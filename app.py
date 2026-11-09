@@ -1,16 +1,10 @@
-
-"""AI Inventory Replenishment Planner | Milestone 2.
-
-Run locally with: streamlit run app.py
-Data file: inventory_replenishment_results.csv (same folder).
-"""
-
-from pathlib import Path
-
-import pandas as pd
 import streamlit as st
+import pandas as pd
 
-# ---------- PAGE CONFIGURATION ----------
+# --------------------------------------------------
+# PAGE CONFIGURATION
+# --------------------------------------------------
+
 st.set_page_config(
     page_title="AI Inventory Replenishment Planner",
     page_icon="📦",
@@ -18,134 +12,74 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# ---------- CLEAN, LIGHT VISUAL DESIGN ----------
-st.markdown(
-    """
-    <style>
-      /* Force readable text when Streamlit Cloud is set to dark mode. */
-      .stApp, [data-testid="stAppViewContainer"] {
-          background: #f7f9fc !important; color: #17243a !important;
-      }
-      [data-testid="stSidebar"], [data-testid="stSidebarContent"] {
-          background: #ffffff !important;
-          border-right: 1px solid #e6ebf2;
-      }
-      [data-testid="stSidebar"] p,
-      [data-testid="stSidebar"] label,
-      [data-testid="stSidebar"] span,
-      [data-testid="stSidebar"] h1,
-      [data-testid="stSidebar"] h2,
-      [data-testid="stSidebar"] h3,
-      [data-testid="stSidebar"] small {
-          color: #243047 !important;
-      }
-      /* Streamlit input widgets may retain a dark appearance. */
-      [data-testid="stSidebar"] [data-baseweb="select"] > div,
-      [data-testid="stSidebar"] [data-baseweb="input"] > div {
-          background: #ffffff !important;
-          color: #17243a !important;
-          border-color: #cbd5e1 !important;
-      }
-      [data-testid="stSidebar"] input,
-      [data-testid="stSidebar"] [data-baseweb="select"] span {
-          color: #17243a !important;
-          -webkit-text-fill-color: #17243a !important;
-      }
-      [data-testid="stSidebar"] input::placeholder {
-          color: #64748b !important;
-          -webkit-text-fill-color: #64748b !important;
-      }
-      [data-testid="stAppViewContainer"] p,
-      [data-testid="stAppViewContainer"] label {
-          color: #334155;
-      }
-      .block-container {
-          padding-top: 2rem;
-          padding-bottom: 3rem;
-          max-width: 1450px;
-      }
-      h1, h2, h3 {
-          color: #17243a;
-          letter-spacing: -.025em;
-      }
-      div[data-testid="stMetric"] {
-          background: white;
-          border: 1px solid #e6ebf2;
-          border-radius: 14px;
-          padding: 17px 20px;
-          box-shadow: 0 3px 12px rgba(21, 42, 80, .035);
-      }
-      div[data-testid="stMetricLabel"] {
-          color: #65748b;
-      }
-      div[data-testid="stMetricValue"] {
-          color: #17243a;
-      }
-      div[data-testid="stChatMessage"] {
-          background: white;
-          border: 1px solid #e6ebf2;
-          border-radius: 14px;
-          padding: 12px 16px;
-          margin-bottom: 10px;
-      }
-      .eyebrow {
-          color: #3765b0;
-          font-size: .83rem;
-          font-weight: 700;
-          letter-spacing: .1em;
-      }
-      .muted {
-          color: #64748b;
-          font-size: .95rem;
-      }
-      .section-title {
-          font-size: 1.35rem;
-          font-weight: 700;
-          margin: 16px 0 10px;
-      }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
+# --------------------------------------------------
+# CLEAN WHITE DASHBOARD STYLING
+# --------------------------------------------------
 
-# ---------- LOAD AND VALIDATE THE INVENTORY CSV ----------
-DATA_FILE = (
-    Path(__file__).resolve().parent
-    / "inventory_replenishment_results.csv"
-)
+st.markdown("""
+<style>
+    .stApp {
+        background-color: #f7f9fc;
+        color: #202b43;
+    }
 
-REQUIRED_COLUMNS = {
-    "Product_ID",
-    "SMA_7",
-    "MAE",
-    "Annual_Demand",
-    "EOQ",
-    "ROP",
-    "Current_Stock",
-    "Status",
-    "Order_Quantity",
-}
+    [data-testid="stSidebar"] {
+        background-color: #ffffff;
+    }
 
+    [data-testid="stSidebar"] * {
+        color: #202b43;
+    }
 
-# Cache the CSV to avoid unnecessary disk reads.
+    h1, h2, h3, p, label {
+        color: #202b43;
+    }
+
+    [data-testid="stMetric"] {
+        background: white;
+        border: 1px solid #e2e8f0;
+        border-radius: 14px;
+        padding: 20px;
+    }
+
+    [data-testid="stMetricLabel"] {
+        color: #53627a;
+    }
+
+    [data-testid="stMetricValue"] {
+        color: #202b43;
+    }
+
+    div[data-testid="stChatMessage"] {
+        background-color: white;
+        border: 1px solid #e2e8f0;
+        border-radius: 12px;
+        padding: 12px;
+    }
+
+    div[data-testid="stChatMessage"] p {
+        color: #202b43;
+    }
+
+    .stButton button {
+        border-radius: 9px;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# --------------------------------------------------
+# LOAD INVENTORY DATA
+# --------------------------------------------------
+
 @st.cache_data
-def load_inventory(path: str, modified_time: float) -> pd.DataFrame:
-    del modified_time  # Refreshes cache when the file changes.
-    frame = pd.read_csv(path)
-    frame.columns = frame.columns.str.strip()
+def load_inventory():
+    # CSV must be stored alongside app.py in GitHub.
+    data = pd.read_csv("inventory_replenishment_results.csv")
 
-    missing = REQUIRED_COLUMNS - set(frame.columns)
-    if missing:
-        raise ValueError(
-            "Missing required CSV columns: "
-            + ", ".join(sorted(missing))
-        )
+    # Remove accidental spaces from column names.
+    data.columns = data.columns.str.strip()
 
-    frame["Product_ID"] = (
-        frame["Product_ID"].astype(str).str.strip()
-    )
-    frame["Status"] = frame["Status"].astype(str).str.strip()
-
+    # Convert numerical fields into actual numbers.
     numeric_columns = [
         "SMA_7",
         "MAE",
@@ -156,34 +90,33 @@ def load_inventory(path: str, modified_time: float) -> pd.DataFrame:
         "Order_Quantity",
     ]
 
-    for col in numeric_columns:
-        frame[col] = pd.to_numeric(
-            frame[col], errors="coerce"
-        ).fillna(0)
+    for column in numeric_columns:
+        if column in data.columns:
+            data[column] = pd.to_numeric(
+                data[column], errors="coerce"
+            ).fillna(0)
 
-    return frame
+    data["Product_ID"] = data["Product_ID"].astype(str)
+    data["Status"] = data["Status"].astype(str).str.strip()
 
+    return data
 
-if not DATA_FILE.exists():
-    st.error(
-        "The inventory CSV was not found. Upload "
-        "inventory_replenishment_results.csv to the same "
-        "GitHub folder as app.py."
-    )
-    st.stop()
 
 try:
-    inventory = load_inventory(
-        str(DATA_FILE), DATA_FILE.stat().st_mtime
-    )
-except (ValueError, pd.errors.ParserError, OSError) as error:
-    st.error(f"Could not load the inventory data: {error}")
+    df = load_inventory()
+except Exception as error:
+    st.error("Unable to load the inventory CSV file.")
+    st.code(str(error))
     st.stop()
 
-# ---------- SIDEBAR FILTERS ----------
+# --------------------------------------------------
+# SIDEBAR FILTERS
+# --------------------------------------------------
+
 with st.sidebar:
-    st.markdown("### Inventory Control")
-    st.caption("Milestone 2 | M5 sales forecasting")
+    st.title("Inventory Control")
+    st.caption("M5 Sales Forecasting | Milestone 2")
+
     st.divider()
 
     status_filter = st.selectbox(
@@ -197,421 +130,342 @@ with st.sidebar:
     )
 
     st.divider()
+
     st.caption(
-        "The results are based on the current CSV snapshot, "
+        "Results are based on the uploaded CSV snapshot, "
         "not live warehouse inventory."
     )
 
-# Apply the selected filters.
-filtered = inventory.copy()
+# --------------------------------------------------
+# FILTER INVENTORY DATA
+# --------------------------------------------------
+
+filtered_df = df.copy()
 
 if status_filter != "All":
-    filtered = filtered[
-        filtered["Status"].str.casefold()
-        == status_filter.casefold()
+    filtered_df = filtered_df[
+        filtered_df["Status"] == status_filter
     ]
 
-if product_search.strip():
-    filtered = filtered[
-        filtered["Product_ID"].str.contains(
-            product_search.strip(),
-            case=False,
-            regex=False,
+if product_search:
+    filtered_df = filtered_df[
+        filtered_df["Product_ID"].str.contains(
+            product_search, case=False, regex=False
         )
     ]
 
-# ---------- PAGE HEADER ----------
-st.markdown(
-    '<div class="eyebrow">INVENTORY INTELLIGENCE</div>',
-    unsafe_allow_html=True,
-)
+# --------------------------------------------------
+# HEADER
+# --------------------------------------------------
 
 st.title("AI Inventory Replenishment Planner")
 
-st.markdown(
-    '<div class="muted">Monitor stock, prioritize replenishment, '
-    'and explore forecasting results.</div>',
-    unsafe_allow_html=True,
+st.write(
+    "Monitor inventory, prioritize replenishment, "
+    "and ask questions about your products."
 )
 
-st.write("")
+st.divider()
 
-# ---------- SUMMARY CARDS ----------
-reorder_rows = filtered[
-    filtered["Status"].str.casefold() == "reorder"
+# --------------------------------------------------
+# DASHBOARD METRICS
+# --------------------------------------------------
+
+total_products = len(filtered_df)
+
+reorder_df = filtered_df[
+    filtered_df["Status"] == "Reorder"
 ]
 
-sufficient_rows = filtered[
-    filtered["Status"].str.casefold() == "sufficient stock"
-]
+reorder_count = len(reorder_df)
 
-c1, c2, c3, c4 = st.columns(4)
-
-c1.metric("Products shown", f"{len(filtered):,}")
-c2.metric("Need reorder", f"{len(reorder_rows):,}")
-c3.metric("Sufficient stock", f"{len(sufficient_rows):,}")
-c4.metric(
-    "Recommended order units",
-    f"{int(filtered['Order_Quantity'].sum()):,}",
+sufficient_count = len(
+    filtered_df[filtered_df["Status"] == "Sufficient Stock"]
 )
 
-st.caption("Summary cards reflect the current sidebar filters.")
-
-# ---------- DASHBOARD CHARTS ----------
-st.markdown(
-    '<div class="section-title">Inventory overview</div>',
-    unsafe_allow_html=True,
+recommended_units = int(
+    reorder_df["Order_Quantity"].sum()
 )
 
-left, right = st.columns(2, gap="large")
+col1, col2, col3, col4 = st.columns(4)
 
-with left:
-    st.subheader("Stock status")
+with col1:
+    st.metric("Products Shown", total_products)
 
-    counts = (
-        filtered["Status"]
-        .value_counts()
-        .reindex(
-            ["Reorder", "Sufficient Stock"],
-            fill_value=0,
+with col2:
+    st.metric("Need Reorder", reorder_count)
+
+with col3:
+    st.metric("Sufficient Stock", sufficient_count)
+
+with col4:
+    st.metric(
+        "Recommended Order Units",
+        f"{recommended_units:,}",
+    )
+
+st.caption("Metrics reflect the selected inventory filters.")
+
+# --------------------------------------------------
+# INVENTORY CHARTS
+# --------------------------------------------------
+
+st.subheader("Inventory Overview")
+
+chart_col1, chart_col2 = st.columns(2)
+
+with chart_col1:
+    st.markdown("#### Stock Status")
+
+    if not filtered_df.empty:
+        counts = (
+            filtered_df["Status"]
+            .value_counts()
+            .rename_axis("Status")
+            .reset_index(name="Products")
         )
-    )
 
-    # Use a light chart theme.
-    st.bar_chart(
-        counts.rename("Products"),
-        color="#4b7bec",
-        theme=None,
-    )
-
-with right:
-    st.subheader("Largest recommended orders")
-
-    top_orders = reorder_rows.nlargest(
-        8, "Order_Quantity"
-    )
-
-    if top_orders.empty:
-        st.info(
-            "No reorder recommendations match the current filters."
+        # Use a simple DataFrame chart to avoid
+        # the previous Streamlit chart TypeError.
+        st.bar_chart(
+            counts,
+            x="Status",
+            y="Products",
         )
     else:
-        st.bar_chart(
-            top_orders.set_index("Product_ID")["Order_Quantity"],
-            color="#16a085",
-            theme=None,
+        st.info("No products match the selected filters.")
+
+with chart_col2:
+    st.markdown("#### Largest Recommended Orders")
+
+    if not reorder_df.empty:
+        top_orders = (
+            reorder_df.nlargest(10, "Order_Quantity")
+            [["Product_ID", "Order_Quantity"]]
+            .set_index("Product_ID")
         )
 
-# ---------- FILTERABLE INVENTORY TABLE ----------
-st.markdown(
-    '<div class="section-title">Product inventory</div>',
-    unsafe_allow_html=True,
-)
+        st.bar_chart(top_orders)
+    else:
+        st.info("No reorder recommendations in this selection.")
+
+# --------------------------------------------------
+# INVENTORY TABLE
+# --------------------------------------------------
+
+st.subheader("Product Inventory Details")
+
+display_columns = [
+    "Product_ID",
+    "Current_Stock",
+    "ROP",
+    "EOQ",
+    "Annual_Demand",
+    "Status",
+    "Order_Quantity",
+]
 
 st.dataframe(
-    filtered[
-        [
-            "Product_ID",
-            "Current_Stock",
-            "ROP",
-            "EOQ",
-            "Annual_Demand",
-            "SMA_7",
-            "MAE",
-            "Status",
-            "Order_Quantity",
-        ]
-    ],
+    filtered_df[display_columns],
     use_container_width=True,
     hide_index=True,
-    column_config={
-        "Product_ID": "Product ID",
-        "Current_Stock": st.column_config.NumberColumn(
-            "Current stock", format="%d"
-        ),
-        "ROP": st.column_config.NumberColumn(
-            "Reorder point", format="%d"
-        ),
-        "EOQ": st.column_config.NumberColumn(
-            "EOQ", format="%d"
-        ),
-        "Annual_Demand": st.column_config.NumberColumn(
-            "Annual demand", format="%.1f"
-        ),
-        "SMA_7": st.column_config.NumberColumn(
-            "7-day average", format="%.2f"
-        ),
-        "MAE": st.column_config.NumberColumn(
-            "Forecast MAE", format="%.2f"
-        ),
-        "Order_Quantity": st.column_config.NumberColumn(
-            "Order units", format="%d"
-        ),
-    },
 )
 
-# Allow users to download the filtered results.
+# --------------------------------------------------
+# DOWNLOAD RESULTS
+# --------------------------------------------------
+
+csv_output = filtered_df.to_csv(index=False).encode("utf-8")
+
 st.download_button(
-    "Download filtered inventory (CSV)",
-    filtered.to_csv(index=False).encode("utf-8"),
-    file_name="filtered_inventory.csv",
+    label="Download Inventory Results",
+    data=csv_output,
+    file_name="filtered_inventory_results.csv",
     mime="text/csv",
 )
 
-# ---------- DATA-BASED CHAT RESPONSE ENGINE ----------
-def answer_question(question: str, data: pd.DataFrame) -> str:
-    """Answer inventory questions using CSV data."""
+st.divider()
 
-    q = question.casefold().strip()
+# --------------------------------------------------
+# INVENTORY CHAT ASSISTANT
+# --------------------------------------------------
+
+st.subheader("AI Inventory Assistant")
+
+st.caption(
+    "Ask about product stock, reorder quantities, "
+    "inventory status, or demand forecasts."
+)
+
+
+def inventory_assistant(question, data):
+    """
+    Answer common inventory questions using CSV data.
+
+    This is a rule-based assistant, not a generative
+    AI model. It does not need an external API key.
+    """
+
+    question_lower = question.lower().strip()
 
     if data.empty:
-        return (
-            "There are no products matching the current filters. "
-            "Clear the filters and try again."
-        )
+        return "There is no inventory data available."
 
-    # Check whether the user mentioned a specific product ID.
-    matches = [
-        pid
-        for pid in data["Product_ID"]
-        if pid.casefold() in q
+    # Check whether the user mentioned a product ID.
+    matching_products = [
+        product
+        for product in data["Product_ID"].tolist()
+        if product.lower() in question_lower
     ]
 
-    if matches:
-        pid = max(matches, key=len)
-        row = data.loc[data["Product_ID"] == pid].iloc[0]
+    if matching_products:
+        product_id = matching_products[0]
+
+        product = data[
+            data["Product_ID"] == product_id
+        ].iloc[0]
 
         return (
-            f"**{pid}**\n\n"
-            f"- Current stock: **{int(row['Current_Stock'])} units**\n"
-            f"- Reorder point (ROP): **{int(row['ROP'])} units**\n"
-            f"- Economic order quantity (EOQ): **{int(row['EOQ'])} units**\n"
-            f"- Inventory status: **{row['Status']}**\n"
-            f"- Recommended order: **{int(row['Order_Quantity'])} units**\n"
-            f"- Estimated annual demand: **{row['Annual_Demand']:.1f} units**\n"
-            f"- 7-day moving average: **{row['SMA_7']:.2f} units/day**\n"
-            f"- Forecast MAE: **{row['MAE']:.2f} units/day**"
+            f"**Product:** {product_id}\n\n"
+            f"- Current stock: {int(product['Current_Stock'])} units\n"
+            f"- Reorder point: {int(product['ROP'])} units\n"
+            f"- Economic order quantity: {int(product['EOQ'])} units\n"
+            f"- Inventory status: {product['Status']}\n"
+            f"- Recommended order: {int(product['Order_Quantity'])} units\n"
+            f"- Annual demand estimate: {product['Annual_Demand']:.1f} units"
         )
 
-    # Identify products requiring replenishment.
-    reorder = data[
-        data["Status"].str.casefold() == "reorder"
-    ]
+    # Questions about items requiring replenishment.
+    if any(word in question_lower for word in [
+        "reorder", "replenish", "restock", "order"
+    ]):
+        products = data[data["Status"] == "Reorder"]
 
-    sufficient = data[
-        data["Status"].str.casefold() == "sufficient stock"
-    ]
+        if products.empty:
+            return "No products currently require reordering."
 
-    # List the products available in the CSV.
-    if any(
-        term in q
-        for term in [
-            "what do we sell",
-            "what all we sell",
-            "which products",
-            "list products",
-            "product list",
-            "all products",
-        ]
-    ):
-        ids = ", ".join(
-            data["Product_ID"].astype(str).tolist()
+        total = int(products["Order_Quantity"].sum())
+
+        product_list = "\n".join(
+            f"- {row['Product_ID']}: "
+            f"{int(row['Order_Quantity'])} units"
+            for _, row in products.iterrows()
         )
 
         return (
-            f"The dataset contains **{len(data)} product IDs**: "
-            f"{ids}.\n\n"
-            "The CSV does not contain product names or "
-            "descriptions, so I cannot identify what these "
-            "products actually are."
+            f"**{len(products)} products require reordering.**\n\n"
+            f"Total recommended order: **{total:,} units**.\n\n"
+            f"{product_list}"
         )
 
-    # Show which products need reordering.
-    if (
-        any(
-            term in q
-            for term in ["which", "list", "show", "top"]
+    # Questions about stock levels.
+    if any(word in question_lower for word in [
+        "stock", "inventory", "available"
+    ]):
+        sufficient = len(
+            data[data["Status"] == "Sufficient Stock"]
         )
-        and any(
-            term in q
-            for term in ["reorder", "restock", "order"]
-        )
-    ):
-        if reorder.empty:
-            return (
-                "No products currently need reordering "
-                "in the selected data."
-            )
 
-        items = "\n".join(
-            f"- **{r.Product_ID}**: "
-            f"stock {int(r.Current_Stock)}, "
-            f"ROP {int(r.ROP)}, "
-            f"order {int(r.Order_Quantity)} units"
-            for r in reorder.itertuples(index=False)
+        low_stock = len(
+            data[data["Status"] == "Reorder"]
         )
 
         return (
-            f"**{len(reorder)} products need reordering:**"
-            f"\n\n{items}"
+            f"There are **{len(data)} products** in the dataset.\n\n"
+            f"- Sufficient stock: {sufficient}\n"
+            f"- Need reorder: {low_stock}\n"
+            f"- Total units currently in stock: "
+            f"{int(data['Current_Stock'].sum()):,}"
         )
 
-    # Count the products needing replenishment.
-    if (
-        any(
-            term in q
-            for term in ["how many", "number", "count"]
+    # Questions about demand forecasts.
+    if any(word in question_lower for word in [
+        "forecast", "demand", "sma", "prediction"
+    ]):
+        top = data.nlargest(5, "Annual_Demand")
+
+        results = "\n".join(
+            f"- {row['Product_ID']}: "
+            f"{row['Annual_Demand']:.1f} estimated annual units"
+            for _, row in top.iterrows()
         )
-        and any(
-            term in q
-            for term in ["reorder", "restock", "order"]
-        )
-    ):
+
         return (
-            f"**{len(reorder)} products** need reordering, "
-            f"with **{int(reorder['Order_Quantity'].sum()):,} "
-            f"recommended units** in total."
+            "**Top five products by estimated annual demand:**\n\n"
+            f"{results}\n\n"
+            "These estimates come from the existing CSV."
         )
 
-    # Calculate the total recommended order quantity.
-    if any(
-        term in q
-        for term in [
-            "total order",
-            "order quantity",
-            "how much to order",
-            "units to order",
-            "recommended order",
-        ]
-    ):
+    # Questions about product catalog.
+    if any(phrase in question_lower for phrase in [
+        "what do we sell",
+        "what all we sell",
+        "list products",
+        "all products",
+        "product list",
+    ]):
+        product_list = "\n".join(
+            f"- {product}"
+            for product in data["Product_ID"].tolist()
+        )
+
         return (
-            "The total recommended order quantity is "
-            f"**{int(data['Order_Quantity'].sum()):,} units** "
-            "across the selected products."
+            "The dataset contains the following product IDs:\n\n"
+            f"{product_list}\n\n"
+            "Product names and descriptions are not available "
+            "in this CSV."
         )
 
-    # Summarize inventory stock levels.
-    if any(
-        term in q
-        for term in [
-            "stock level",
-            "inventory level",
-            "how much stock",
-            "current stock",
-            "stock summary",
-        ]
-    ):
-        return (
-            f"There are **{len(data)} products** in the "
-            f"selected dataset. Current stock totals "
-            f"**{int(data['Current_Stock'].sum()):,} units**. "
-            f"**{len(reorder)}** need reordering and "
-            f"**{len(sufficient)}** have sufficient stock."
-        )
-
-    # Summarize demand forecasting results.
-    if any(
-        term in q
-        for term in [
-            "forecast",
-            "demand",
-            "moving average",
-            "mae",
-        ]
-    ):
-        return (
-            "The dataset includes 7-day moving average "
-            "(SMA_7), forecast error (MAE), and estimated "
-            f"annual demand for **{len(data)} products**. "
-            f"Total estimated annual demand is "
-            f"**{data['Annual_Demand'].sum():,.1f} units**. "
-            "Ask about a specific product ID to see "
-            "its forecast values."
-        )
-
-    # Count products with sufficient inventory.
-    if any(
-        term in q
-        for term in [
-            "sufficient",
-            "healthy stock",
-            "in stock",
-        ]
-    ):
-        return (
-            f"**{len(sufficient)} products** are marked "
-            "as having sufficient stock in the selected dataset."
-        )
-
-    # Provide help for unsupported questions.
     return (
-        "I can answer questions using the inventory CSV. "
+        "I can answer questions about your inventory data. "
         "Try asking:\n\n"
-        "- How many products need reordering?\n"
         "- Which products need reordering?\n"
-        "- What are the current stock levels?\n"
-        "- What is the total recommended order quantity?\n"
-        "- Tell me about HOBBIES_1_001\n\n"
-        "This assistant uses dataset-based rules rather "
-        "than a generative AI model."
+        "- What is the stock level of HOBBIES_1_001?\n"
+        "- Which products have the highest demand?\n"
+        "- What products are in the dataset?"
     )
 
 
-# ---------- CHAT PANEL ----------
-st.divider()
+# --------------------------------------------------
+# CHAT HISTORY
+# --------------------------------------------------
 
-st.markdown(
-    '<div class="section-title">Ask the Inventory Assistant</div>',
-    unsafe_allow_html=True,
-)
-
-st.caption(
-    "Ask about your products, forecasts, reorder points, "
-    "and stock. Chat uses the currently filtered products."
-)
-
-# Store chat messages so they persist during interactions.
 if "messages" not in st.session_state:
     st.session_state.messages = [
         {
             "role": "assistant",
             "content": (
-                "Hello! I can help you explore your inventory. "
-                "What would you like to know?"
+                "Hello! I'm your Inventory Assistant. "
+                "Ask me about stock levels, reorder quantities, "
+                "or demand forecasts."
             ),
         }
     ]
 
-# Display previous chat messages.
+# Display previous messages.
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
-# Accept a new user question and generate a response.
-if prompt := st.chat_input("Ask about your inventory..."):
+# Chat input appears at the bottom of the page.
+user_question = st.chat_input(
+    "Ask about your inventory..."
+)
+
+if user_question:
     st.session_state.messages.append(
-        {"role": "user", "content": prompt}
+        {"role": "user", "content": user_question}
     )
 
     with st.chat_message("user"):
-        st.markdown(prompt)
+        st.markdown(user_question)
 
-    response = answer_question(prompt, filtered)
+    # Answer using the full CSV rather than sidebar filters.
+    answer = inventory_assistant(user_question, df)
 
     st.session_state.messages.append(
-        {"role": "assistant", "content": response}
+        {"role": "assistant", "content": answer}
     )
 
     with st.chat_message("assistant"):
-        st.markdown(response)
-
-# Let the user reset the conversation.
-if st.button("Clear conversation"):
-    st.session_state.messages = []
-    st.rerun()
-
-st.caption(
-    "Prototype for Milestone 2. EOQ, ROP, and demand "
-    "estimates are imported from the CSV; they are not "
-    "recalculated in this app."
-)
+        st.markdown(answer)
