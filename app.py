@@ -4,6 +4,13 @@
 # Allows users to ask questions about inventory
 # --------------------------------------------------
 
+# Import libraries for the inventory assistant
+import streamlit as st
+import pandas as pd
+
+# Load inventory data
+df = pd.read_csv("inventory_replenishment_results.csv")
+
 st.divider()
 st.header("AI Inventory Assistant")
 
