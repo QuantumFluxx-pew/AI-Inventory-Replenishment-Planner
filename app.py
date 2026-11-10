@@ -14,6 +14,7 @@ Run locally:   streamlit run app.py
 
 import os
 
+import altair as alt
 import pandas as pd
 import streamlit as st
 
@@ -35,12 +36,12 @@ st.set_page_config(
 # 2. CLEAN WHITE DESIGN
 # ==========================================================
 
+# Colors (page, text, inputs) come from .streamlit/config.toml, which forces
+# the light theme. This CSS only adds card styling on top.
 st.markdown("""
 <style>
-    .stApp { background: #f5f7fb; color: #202b43; }
     .block-container { max-width: 1800px; padding-top: 1.5rem;
                        padding-left: 2rem; padding-right: 2rem; }
-    h1, h2, h3, h4, p, label { color: #202b43; }
 
     /* Metric cards */
     [data-testid="stMetric"] {
@@ -48,14 +49,11 @@ st.markdown("""
         padding: 16px; box-shadow: 0 3px 12px rgba(20, 35, 65, 0.03);
     }
     [data-testid="stMetricLabel"] { color: #66758b; }
-    [data-testid="stMetricValue"] { color: #202b43; }
 
-    /* Form controls */
+    /* Form controls: soft border */
     div[data-baseweb="select"] > div, div[data-baseweb="input"] > div {
-        background: #ffffff; color: #202b43;
         border: 1px solid #dbe3ef; border-radius: 9px;
     }
-    div[data-baseweb="select"] *, div[data-baseweb="input"] input { color: #202b43; }
 
     /* Chat messages */
     [data-testid="stChatMessage"] {
@@ -129,6 +127,90 @@ AI_ENABLED = bool(API_KEY)
 # Recalculate the plan for the current assumptions.
 assumptions = st.session_state.assumptions
 plan = model.calculate_plan(base_df, assumptions)
+
+# ==========================================================
+# 3b. CHARTS (Altair, built into Streamlit)
+# ==========================================================
+# Status colors are reserved for status only: red = Reorder, green = OK.
+# Every chart also has a legend or label, so meaning never relies on color alone.
+
+STATUS_COLORS = alt.Scale(domain=["Reorder", "Sufficient Stock"],
+                          range=["#d03b3b", "#0ca30c"])
+INK = "#52514e"        # neutral dark gray for reference marks (ROP, lead time)
+ORDER_BLUE = "#2a78d6"  # single-series color for order quantities
+GRID = "#e1e0d9"
+
+
+def _style(chart, height):
+    """Shared look: light gray grid, readable labels, no chart border."""
+    return (chart.properties(height=height)
+            .configure_view(strokeWidth=0)
+            .configure_axis(gridColor=GRID, domainColor="#c3c2b7",
+                            labelColor="#202b43", titleColor="#52514e",
+                            labelFontSize=12, titleFontSize=12)
+            .configure_legend(orient="top", title=None, labelFontSize=12))
+
+
+def stock_vs_rop_chart(data):
+    """Horizontal bars = current stock (colored by status); dark tick = ROP.
+    A bar that ends at or before its tick needs reordering."""
+    base = alt.Chart(data).encode(
+        y=alt.Y("Product_ID:N", sort=None, title=None),
+        tooltip=[
+            alt.Tooltip("Product_ID", title="Product"),
+            alt.Tooltip("Current_Stock", title="Current stock"),
+            alt.Tooltip("ROP", title="Reorder point"),
+            alt.Tooltip("Status"),
+            alt.Tooltip("Order_Quantity", title="Order now"),
+        ],
+    )
+    bars = base.mark_bar(cornerRadiusEnd=4, height={"band": 0.7}).encode(
+        x=alt.X("Current_Stock:Q", title="Units"),
+        color=alt.Color("Status:N", scale=STATUS_COLORS),
+    )
+    rop_tick = base.mark_tick(color=INK, thickness=3, size=18).encode(x="ROP:Q")
+    return _style(bars + rop_tick, height=max(160, 24 * len(data)))
+
+
+def days_of_cover_chart(data, lead_time):
+    """How many days current stock lasts at forecast demand, compared with
+    the supplier lead time (dashed line). Bars left of the line run out
+    before a new order could arrive."""
+    covered = data.dropna(subset=["Days_of_Cover"]).sort_values("Days_of_Cover")
+    base = alt.Chart(covered).encode(
+        y=alt.Y("Product_ID:N", sort=None, title=None))
+    bars = base.mark_bar(cornerRadiusEnd=4, height={"band": 0.7}).encode(
+        x=alt.X("Days_of_Cover:Q", title="Days of stock left at forecast demand"),
+        color=alt.Color("Status:N", scale=STATUS_COLORS),
+        tooltip=[alt.Tooltip("Product_ID", title="Product"),
+                 alt.Tooltip("Days_of_Cover", title="Days of cover"),
+                 alt.Tooltip("Status")],
+    )
+    line_data = pd.DataFrame({"x": [lead_time],
+                              "label": [f"Lead time: {lead_time:g} days"]})
+    rule = alt.Chart(line_data).mark_rule(color=INK, strokeDash=[6, 4],
+                                          strokeWidth=2).encode(x="x:Q")
+    label = alt.Chart(line_data).mark_text(
+        align="left", dx=6, dy=-6, color=INK, fontSize=12, fontWeight="bold"
+    ).encode(x="x:Q", y=alt.value(0), text="label:N")
+    return _style(bars + rule + label, height=max(160, 24 * len(covered)))
+
+
+def order_quantity_chart(data):
+    """Recommended order units, largest first, with the value at each bar end."""
+    top = data[data["Order_Quantity"] > 0].nlargest(10, "Order_Quantity")
+    base = alt.Chart(top).encode(
+        y=alt.Y("Product_ID:N", sort="-x", title=None))
+    bars = base.mark_bar(color=ORDER_BLUE, cornerRadiusEnd=4,
+                         height={"band": 0.7}).encode(
+        x=alt.X("Order_Quantity:Q", title="Units to order (EOQ)",
+                axis=alt.Axis(tickCount=6)),
+        tooltip=[alt.Tooltip("Product_ID", title="Product"),
+                 alt.Tooltip("Order_Quantity", title="Units to order")],
+    )
+    values = base.mark_text(align="left", dx=4, color="#202b43", fontSize=12).encode(
+        x="Order_Quantity:Q", text="Order_Quantity:Q")
+    return _style(bars + values, height=max(120, 28 * len(top)))
 
 # ==========================================================
 # 4. HEADER
@@ -239,45 +321,54 @@ with dashboard_col:
     if filtered.empty:
         st.info("No products match your filters.")
     else:
-        st.subheader("Current Stock vs. Reorder Point")
-        st.caption("Products whose stock bar is at or below the ROP bar need reordering.")
-        st.bar_chart(
-            filtered.set_index("Product_ID")[["Current_Stock", "ROP"]],
-            stack=False, height=320,
-        )
+        # Tabs keep three charts in the space of one.
+        tab_stock, tab_cover, tab_orders = st.tabs(
+            ["Stock vs. Reorder Point", "Days of Cover", "Recommended Orders"])
 
-        ch1, ch2 = st.columns(2)
-        with ch1:
-            st.subheader("Stock Status")
-            counts = (filtered["Status"].value_counts()
-                      .rename_axis("Status").reset_index(name="Products"))
-            st.bar_chart(counts, x="Status", y="Products", height=260)
-        with ch2:
-            st.subheader("Largest Recommended Orders")
-            reorder_rows = filtered[filtered["Status"] == "Reorder"]
-            if reorder_rows.empty:
-                st.info("No reorder items in this selection.")
+        with tab_stock:
+            st.caption("Bar = current stock · dark tick = reorder point (ROP). "
+                       "A bar that ends at or before its tick needs reordering.")
+            st.altair_chart(stock_vs_rop_chart(filtered), width="stretch")
+
+        with tab_cover:
+            st.caption("How long current stock lasts at forecast demand. Products left "
+                       "of the dashed line run out before a new order could arrive. "
+                       "Products with zero forecast demand are not shown.")
+            st.altair_chart(days_of_cover_chart(filtered, assumptions.lead_time_days),
+                            width="stretch")
+
+        with tab_orders:
+            if (filtered["Order_Quantity"] > 0).any():
+                st.caption("Largest recommended orders (EOQ), up to 10 products.")
+                st.altair_chart(order_quantity_chart(filtered), width="stretch")
             else:
-                st.bar_chart(
-                    reorder_rows.nlargest(10, "Order_Quantity")
-                    .set_index("Product_ID")[["Order_Quantity"]],
-                    height=260,
-                )
+                st.info("No products in this selection need an order.")
 
     # ------------------------------------------------------
     # 5e. PRODUCT TABLE + DOWNLOAD
     # ------------------------------------------------------
     st.subheader("Product Inventory Details")
-    table_cols = ["Product_ID", "Current_Stock", "ROP", "Safety_Stock", "EOQ",
-                  "Daily_Demand", "Annual_Demand", "Days_of_Cover", "Status", "Order_Quantity"]
+
+    # Display copy with an icon + label for status (never color alone).
+    table = filtered.copy()
+    table["Status"] = table["Status"].map(
+        {"Reorder": "🔴 Reorder", "Sufficient Stock": "🟢 Sufficient"})
+    table_cols = ["Product_ID", "Status", "Current_Stock", "ROP", "Order_Quantity",
+                  "EOQ", "Days_of_Cover", "Daily_Demand", "Annual_Demand", "Safety_Stock"]
     st.dataframe(
-        filtered[table_cols],
-        width="stretch", hide_index=True, height=350,
+        table[table_cols],
+        width="stretch", hide_index=True, height=360,
         column_config={
+            "Product_ID": st.column_config.TextColumn("Product"),
+            "Current_Stock": st.column_config.NumberColumn("Stock", help="Units on hand (simulated)"),
+            "ROP": st.column_config.NumberColumn("Reorder Point", help="Reorder when stock ≤ this"),
+            "Order_Quantity": st.column_config.NumberColumn("Order Now", help="Units to order (EOQ if reordering)"),
+            "EOQ": st.column_config.NumberColumn("EOQ", help="Economic order quantity"),
+            "Days_of_Cover": st.column_config.NumberColumn("Days of Cover", format="%.1f",
+                                                           help="Stock ÷ forecast daily demand"),
             "Daily_Demand": st.column_config.NumberColumn("Daily Demand", format="%.2f"),
-            "Annual_Demand": st.column_config.NumberColumn("Annual Demand", format="%.1f"),
-            "Safety_Stock": st.column_config.NumberColumn("Safety Stock", format="%.2f"),
-            "Days_of_Cover": st.column_config.NumberColumn("Days of Cover", format="%.1f"),
+            "Annual_Demand": st.column_config.NumberColumn("Annual Demand", format="%.0f"),
+            "Safety_Stock": st.column_config.NumberColumn("Safety Stock", format="%.1f"),
         },
     )
     st.download_button(
