@@ -61,7 +61,11 @@ The agent is instructed to **ask for missing inputs** (for example, "increase de
 | `agent.py` | Gemini tool-calling agent, tool definitions, offline fallback |
 | `prepare_data.py` | Rebuilds the CSV from raw M5 data (run locally) |
 | `inventory_replenishment_results.csv` | 20 HOBBIES products, store TX_1, with simulated stock |
-| `tests/test_inventory.py` | 20 automated tests |
+| `product_prices.csv` | Real shelf price of each product (M5 `sell_prices.csv`, latest week). Shown for context only |
+| `.streamlit/config.toml` | Forces the light theme |
+
+**About product names:** Walmart anonymised M5, so there are no real product names. An ID like `HOBBIES_1_019` means *category HOBBIES, department 1, item 019*. The app shows it as **"Hobbies Item 019"**.
+| `tests/test_inventory.py` | 21 automated tests |
 
 ## Run it on your computer
 
@@ -92,7 +96,7 @@ Download `sales_train_validation.csv` from the [Kaggle M5 competition](https://w
 python prepare_data.py
 ```
 
-This reproduces `inventory_replenishment_results.csv` exactly.
+This reproduces `inventory_replenishment_results.csv` exactly. Put `sell_prices.csv` in the folder too, and it also writes `product_prices.csv`.
 
 ## Testing
 

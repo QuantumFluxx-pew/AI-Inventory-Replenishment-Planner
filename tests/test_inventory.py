@@ -106,8 +106,15 @@ def test_product_lookup(base):
     plan = m.calculate_plan(base)
     assert m.find_product(plan, "hobbies 1 16") == "HOBBIES_1_016"
     assert m.find_product(plan, "HOBBIES-1-019") == "HOBBIES_1_019"
+    assert m.find_product(plan, "Hobbies Item 019") == "HOBBIES_1_019"
     with pytest.raises(m.InputError):
         m.find_product(plan, "HOBBIES_1_099")
+
+
+def test_names_and_prices(base):
+    row = base[base["Product_ID"] == "HOBBIES_1_019"].iloc[0]
+    assert row["Name"] == "Hobbies Item 019"
+    assert row["Sell_Price"] == pytest.approx(0.48)   # real M5 price, store TX_1
 
 
 # ---------------------------------------------------------------- 4. agent tools

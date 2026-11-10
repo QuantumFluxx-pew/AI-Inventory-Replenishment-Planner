@@ -155,9 +155,9 @@ def stock_vs_rop_chart(data):
     """Horizontal bars = current stock (colored by status); dark tick = ROP.
     A bar that ends at or before its tick needs reordering."""
     base = alt.Chart(data).encode(
-        y=alt.Y("Product_ID:N", sort=None, title=None),
+        y=alt.Y("Name:N", sort=None, title=None, axis=alt.Axis(labelOverlap=False)),
         tooltip=[
-            alt.Tooltip("Product_ID", title="Product"),
+            alt.Tooltip("Name", title="Product"), alt.Tooltip("Product_ID", title="M5 ID"),
             alt.Tooltip("Current_Stock", title="Current stock"),
             alt.Tooltip("ROP", title="Reorder point"),
             alt.Tooltip("Status"),
@@ -178,11 +178,11 @@ def days_of_cover_chart(data, lead_time):
     before a new order could arrive."""
     covered = data.dropna(subset=["Days_of_Cover"]).sort_values("Days_of_Cover")
     base = alt.Chart(covered).encode(
-        y=alt.Y("Product_ID:N", sort=None, title=None))
+        y=alt.Y("Name:N", sort=None, title=None, axis=alt.Axis(labelOverlap=False)))
     bars = base.mark_bar(cornerRadiusEnd=4, height={"band": 0.7}).encode(
         x=alt.X("Days_of_Cover:Q", title="Days of stock left at forecast demand"),
         color=alt.Color("Status:N", scale=STATUS_COLORS),
-        tooltip=[alt.Tooltip("Product_ID", title="Product"),
+        tooltip=[alt.Tooltip("Name", title="Product"), alt.Tooltip("Product_ID", title="M5 ID"),
                  alt.Tooltip("Days_of_Cover", title="Days of cover"),
                  alt.Tooltip("Status")],
     )
@@ -200,12 +200,12 @@ def order_quantity_chart(data):
     """Recommended order units, largest first, with the value at each bar end."""
     top = data[data["Order_Quantity"] > 0].nlargest(10, "Order_Quantity")
     base = alt.Chart(top).encode(
-        y=alt.Y("Product_ID:N", sort="-x", title=None))
+        y=alt.Y("Name:N", sort="-x", title=None, axis=alt.Axis(labelOverlap=False)))
     bars = base.mark_bar(color=ORDER_BLUE, cornerRadiusEnd=4,
                          height={"band": 0.7}).encode(
         x=alt.X("Order_Quantity:Q", title="Units to order (EOQ)",
                 axis=alt.Axis(tickCount=6)),
-        tooltip=[alt.Tooltip("Product_ID", title="Product"),
+        tooltip=[alt.Tooltip("Name", title="Product"), alt.Tooltip("Product_ID", title="M5 ID"),
                  alt.Tooltip("Order_Quantity", title="Units to order")],
     )
     values = base.mark_text(align="left", dx=4, color="#202b43", fontSize=12).encode(
@@ -294,14 +294,17 @@ with dashboard_col:
     # ------------------------------------------------------
     f1, f2 = st.columns(2)
     status_filter = f1.selectbox("Inventory status", ["All", "Reorder", "Sufficient Stock"])
-    product_search = f2.text_input("Search product ID", placeholder="HOBBIES_1_001")
+    product_search = f2.text_input("Search product", placeholder="Item 019 or HOBBIES_1_019")
 
     filtered = plan.copy()
     if status_filter != "All":
         filtered = filtered[filtered["Status"] == status_filter]
     if product_search:
-        filtered = filtered[filtered["Product_ID"].str.contains(
-            product_search.strip(), case=False, regex=False)]
+        # Match either the friendly name or the M5 ID.
+        term = product_search.strip()
+        filtered = filtered[
+            filtered["Name"].str.contains(term, case=False, regex=False)
+            | filtered["Product_ID"].str.contains(term, case=False, regex=False)]
 
     # ------------------------------------------------------
     # 5c. KPI CARDS
@@ -328,19 +331,21 @@ with dashboard_col:
         with tab_stock:
             st.caption("Bar = current stock · dark tick = reorder point (ROP). "
                        "A bar that ends at or before its tick needs reordering.")
-            st.altair_chart(stock_vs_rop_chart(filtered), width="stretch")
+            chart = stock_vs_rop_chart(filtered)
+            st.altair_chart(chart, width="stretch", height=chart.height)
 
         with tab_cover:
             st.caption("How long current stock lasts at forecast demand. Products left "
                        "of the dashed line run out before a new order could arrive. "
                        "Products with zero forecast demand are not shown.")
-            st.altair_chart(days_of_cover_chart(filtered, assumptions.lead_time_days),
-                            width="stretch")
+            chart = days_of_cover_chart(filtered, assumptions.lead_time_days)
+            st.altair_chart(chart, width="stretch", height=chart.height)
 
         with tab_orders:
             if (filtered["Order_Quantity"] > 0).any():
                 st.caption("Largest recommended orders (EOQ), up to 10 products.")
-                st.altair_chart(order_quantity_chart(filtered), width="stretch")
+                chart = order_quantity_chart(filtered)
+                st.altair_chart(chart, width="stretch", height=chart.height)
             else:
                 st.info("No products in this selection need an order.")
 
@@ -353,13 +358,19 @@ with dashboard_col:
     table = filtered.copy()
     table["Status"] = table["Status"].map(
         {"Reorder": "🔴 Reorder", "Sufficient Stock": "🟢 Sufficient"})
-    table_cols = ["Product_ID", "Status", "Current_Stock", "ROP", "Order_Quantity",
-                  "EOQ", "Days_of_Cover", "Daily_Demand", "Annual_Demand", "Safety_Stock"]
+    table_cols = ["Name", "Status", "Current_Stock", "ROP", "Order_Quantity",
+                  "EOQ", "Days_of_Cover", "Sell_Price", "Daily_Demand", "Annual_Demand",
+                  "Safety_Stock", "Product_ID"]
     st.dataframe(
         table[table_cols],
         width="stretch", hide_index=True, height=360,
         column_config={
-            "Product_ID": st.column_config.TextColumn("Product"),
+            "Name": st.column_config.TextColumn(
+                "Product", help="Walmart hid real product names in M5; this is category + item number"),
+            "Product_ID": st.column_config.TextColumn("M5 ID"),
+            "Sell_Price": st.column_config.NumberColumn(
+                "Shelf Price", format="$%.2f",
+                help="Real M5 price at store TX_1 (latest week). Shown for context; not used in EOQ/ROP"),
             "Current_Stock": st.column_config.NumberColumn("Stock", help="Units on hand (simulated)"),
             "ROP": st.column_config.NumberColumn("Reorder Point", help="Reorder when stock ≤ this"),
             "Order_Quantity": st.column_config.NumberColumn("Order Now", help="Units to order (EOQ if reordering)"),
@@ -382,8 +393,13 @@ with dashboard_col:
     # 5f. PRODUCT DRILL-DOWN: shows each calculation step
     # ------------------------------------------------------
     st.subheader("How a Recommendation Is Calculated")
-    chosen = st.selectbox("Choose a product", plan["Product_ID"].tolist())
+    names = dict(zip(plan["Product_ID"], plan["Name"]))
+    chosen = st.selectbox("Choose a product", plan["Product_ID"].tolist(),
+                          format_func=lambda pid: f"{names[pid]} ({pid})")
     detail = InventoryTools(base_df, assumptions).get_product_details(chosen)
+    if detail.get("shelf_price_usd") is not None:
+        st.caption(f"{detail['name']} · M5 ID {detail['product_id']} · "
+                   f"shelf price ${detail['shelf_price_usd']:.2f} at store TX_1")
     d1, d2, d3, d4 = st.columns(4)
     d1.metric("Forecast (units/day)", f"{detail['daily_demand_forecast']:.2f}")
     d2.metric("Reorder Point", detail["reorder_point"])

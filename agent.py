@@ -56,8 +56,11 @@ def _r(value, digits=2):
 
 
 def _product_row(row: pd.Series) -> dict:
+    price = row.get("Sell_Price")
     return {
         "product_id": row["Product_ID"],
+        "name": row.get("Name", row["Product_ID"]),
+        "shelf_price_usd": None if pd.isna(price) else float(price),
         "current_stock": int(row["Current_Stock"]),
         "reorder_point": int(row["ROP"]),
         "eoq": int(row["EOQ"]),
@@ -314,6 +317,10 @@ TOOL_SPECS = [
 
 SYSTEM_PROMPT = """You are the Inventory Replenishment Assistant for a warehouse manager.
 You work with 20 HOBBIES products from Walmart store TX_1 (M5 dataset).
+Walmart anonymised the data, so products have no real names: each has an ID like
+HOBBIES_1_019 and a display name like "Hobbies Item 019" (category + item number).
+Never invent what a product actually is. Shelf prices are real M5 data but are shown
+for context only; they do not affect EOQ or ROP.
 
 Your models (run by Python tools, never by you):
 - 7-day Simple Moving Average demand forecast (accuracy measured by MAE)
@@ -429,7 +436,7 @@ class GeminiAgent:
 # 4. OFFLINE MODE (rule-based, NO language model)
 # ======================================================================
 
-_PID = re.compile(r"hobbies[\s_-]*1[\s_-]*(\d{1,3})", re.I)
+_PID = re.compile(r"hobbies[\s_-]*(?:1|item)[\s_-]*(\d{1,3})", re.I)
 _PCT = re.compile(r"(-?\d+(?:\.\d+)?)\s*(%|percent)", re.I)
 _DAYS = re.compile(r"(\d+(?:\.\d+)?)\s*-?\s*days?", re.I)
 
@@ -437,7 +444,8 @@ _DAYS = re.compile(r"(\d+(?:\.\d+)?)\s*-?\s*days?", re.I)
 def _fmt_products(rows, show_order=True):
     lines = []
     for r in rows:
-        line = f"- **{r['product_id']}**: stock {r['current_stock']}, ROP {r['reorder_point']}"
+        line = (f"- **{r['name']}** ({r['product_id']}): "
+                f"stock {r['current_stock']}, ROP {r['reorder_point']}")
         if show_order and r["recommended_order_units"]:
             line += f", order **{r['recommended_order_units']}** units"
         lines.append(line)
@@ -489,8 +497,10 @@ class OfflineAssistant:
             if "error" in res:
                 return reply(res["error"])
             steps = res["calculation_steps"]
+            price = (f", shelf price ${res['shelf_price_usd']:.2f}"
+                     if res.get("shelf_price_usd") is not None else "")
             return reply(
-                f"**{res['product_id']}: {res['status']}**\n\n"
+                f"**{res['name']}** ({res['product_id']}{price}): **{res['status']}**\n\n"
                 f"- Forecast demand: {res['daily_demand_forecast']} units/day (7-day SMA)\n"
                 f"- Current stock: {res['current_stock']} units, about "
                 f"{res['days_of_cover']} days of cover vs a {res['lead_time_days']:g}-day lead time\n"
@@ -503,7 +513,7 @@ class OfflineAssistant:
         if any(w in q for w in ["priorit", "urgent", "first", "most critical"]):
             res = call("prioritize_reorders", limit=5)
             lines = "\n".join(
-                f"{r['rank']}. **{r['product_id']}**: {r['days_of_cover']} days of cover, "
+                f"{r['rank']}. **{r['name']}** ({r['product_id']}): {r['days_of_cover']} days of cover, "
                 f"{r['units_below_reorder_point']} units below ROP, order {r['recommended_order_units']}"
                 for r in res["ranked"]
             )

@@ -34,6 +34,7 @@ exactly. tests/test_inventory_model.py checks that.
 from __future__ import annotations
 
 import math
+import os
 from dataclasses import dataclass, asdict, replace
 from statistics import NormalDist
 
@@ -247,7 +248,31 @@ def load_base_data(path: str = "inventory_replenishment_results.csv") -> pd.Data
     if base["Product_ID"].duplicated().any():
         raise InputError("Each Product_ID must appear only once in the CSV.")
 
+    # Friendly display name (M5 has no real product names).
+    base["Name"] = base["Product_ID"].map(product_label)
+
+    # Real shelf price from M5 sell_prices.csv, if prepare_data.py saved it.
+    # Display only: prices do not change EOQ or ROP.
+    prices_path = os.path.join(os.path.dirname(os.path.abspath(path)), "product_prices.csv")
+    if os.path.exists(prices_path):
+        prices = pd.read_csv(prices_path)[["Product_ID", "Sell_Price"]]
+        base = base.merge(prices, on="Product_ID", how="left")
+    else:
+        base["Sell_Price"] = np.nan
+
     return base
+
+
+def product_label(product_id: str) -> str:
+    """'HOBBIES_1_019' -> 'Hobbies Item 019'.
+
+    M5 anonymises products, so there are no real names. The label just
+    makes the ID easier to read: category + item number.
+    """
+    parts = str(product_id).split("_")
+    if len(parts) == 3:
+        return f"{parts[0].title()} Item {parts[2]}"
+    return str(product_id)
 
 
 def calculate_plan(base: pd.DataFrame, assumptions: Assumptions = DEFAULT_ASSUMPTIONS) -> pd.DataFrame:
@@ -342,6 +367,8 @@ def find_product(plan: pd.DataFrame, text: str) -> str:
 
     ids = list(plan["Product_ID"])
     query = str(text).strip().upper().replace("-", "_").replace(" ", "_")
+    # Also accept the friendly name, e.g. 'Hobbies Item 019'.
+    query = query.replace("_ITEM_", "_1_")
 
     if query in ids:
         return query
