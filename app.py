@@ -1,7 +1,24 @@
+"""
+app.py: AI Inventory & Replenishment Planner (Streamlit)
 
-import streamlit as st
+Left panel : inventory dashboard (KPIs, charts, table, product drill-down)
+Right panel: Inventory Assistant chat
+
+Files this app uses:
+    inventory_model.py   - SMA / EOQ / ROP calculations (the embedded models)
+    agent.py             - Gemini tool-calling agent + offline fallback
+    inventory_replenishment_results.csv - product forecasts and simulated stock
+
+Run locally:   streamlit run app.py
+"""
+
+import os
+
 import pandas as pd
-import html
+import streamlit as st
+
+import inventory_model as model
+from agent import DEFAULT_MODEL, GeminiAgent, InventoryTools, OfflineAssistant
 
 # ==========================================================
 # 1. PAGE CONFIGURATION
@@ -11,7 +28,7 @@ st.set_page_config(
     page_title="AI Inventory Replenishment Planner",
     page_icon="📦",
     layout="wide",
-    initial_sidebar_state="collapsed"
+    initial_sidebar_state="collapsed",
 )
 
 # ==========================================================
@@ -20,589 +37,364 @@ st.set_page_config(
 
 st.markdown("""
 <style>
-    /* Main application */
-    .stApp {
-        background: #f5f7fb;
-        color: #202b43;
-    }
+    .stApp { background: #f5f7fb; color: #202b43; }
+    .block-container { max-width: 1800px; padding-top: 1.5rem;
+                       padding-left: 2rem; padding-right: 2rem; }
+    h1, h2, h3, h4, p, label { color: #202b43; }
 
-    .block-container {
-        max-width: 1800px;
-        padding-top: 1.5rem;
-        padding-left: 2rem;
-        padding-right: 2rem;
-    }
-
-    /* Keep dashboard text readable */
-    h1, h2, h3, h4, p, label {
-        color: #202b43;
-    }
-
-    /* Dashboard metric cards */
+    /* Metric cards */
     [data-testid="stMetric"] {
-        background: #ffffff;
-        border: 1px solid #e3e8f0;
-        border-radius: 14px;
-        padding: 16px;
-        box-shadow: 0 3px 12px rgba(20, 35, 65, 0.03);
+        background: #ffffff; border: 1px solid #e3e8f0; border-radius: 14px;
+        padding: 16px; box-shadow: 0 3px 12px rgba(20, 35, 65, 0.03);
     }
+    [data-testid="stMetricLabel"] { color: #66758b; }
+    [data-testid="stMetricValue"] { color: #202b43; }
 
-    [data-testid="stMetricLabel"] {
-        color: #66758b;
+    /* Form controls */
+    div[data-baseweb="select"] > div, div[data-baseweb="input"] > div {
+        background: #ffffff; color: #202b43;
+        border: 1px solid #dbe3ef; border-radius: 9px;
     }
+    div[data-baseweb="select"] *, div[data-baseweb="input"] input { color: #202b43; }
 
-    [data-testid="stMetricValue"] {
-        color: #202b43;
-    }
-
-    /* White form controls */
-    div[data-baseweb="select"] > div,
-    div[data-baseweb="input"] > div {
-        background: #ffffff;
-        color: #202b43;
-        border: 1px solid #dbe3ef;
-        border-radius: 9px;
-    }
-
-    div[data-baseweb="select"] *,
-    div[data-baseweb="input"] input {
-        color: #202b43;
-    }
-
-    /* Chat message cards */
+    /* Chat messages */
     [data-testid="stChatMessage"] {
-        background: #ffffff;
-        border: 1px solid #e3e8f0;
-        border-radius: 12px;
-        padding: 12px;
+        background: #ffffff; border: 1px solid #e3e8f0;
+        border-radius: 12px; padding: 12px;
     }
 
-    [data-testid="stChatMessage"] p {
-        color: #202b43;
+    /* Buttons */
+    .stButton button, .stDownloadButton button, .stFormSubmitButton button {
+        background: #ffffff; color: #244b91;
+        border: 1px solid #dbe3ef; border-radius: 9px;
     }
 
-    /* Chat input */
-    [data-testid="stChatInput"] {
-        background: #ffffff;
-        border: 1px solid #dbe3ef;
-        border-radius: 12px;
-    }
+    /* Mode badge in the chat header */
+    .mode-badge { display: inline-block; padding: 3px 10px; border-radius: 999px;
+                  font-size: 0.8rem; font-weight: 600; }
+    .mode-llm { background: #e7f6ec; color: #1d6b3a; border: 1px solid #b9e3c7; }
+    .mode-offline { background: #fff4e0; color: #8a5a00; border: 1px solid #f1d39b; }
 
-    [data-testid="stChatInput"] textarea {
-        color: #202b43;
-    }
-
-    /* General buttons */
-    .stButton button,
-    .stDownloadButton button {
-        background: #ffffff;
-        color: #244b91;
-        border: 1px solid #dbe3ef;
-        border-radius: 9px;
-    }
-
-    /* Small section description */
-    .muted {
-        color: #718096;
-        font-size: 0.9rem;
-    }
-
-    /* Section separation */
-    hr {
-        border-color: #e3e8f0;
-    }
+    hr { border-color: #e3e8f0; }
 </style>
 """, unsafe_allow_html=True)
 
 # ==========================================================
-# 3. LOAD AND VALIDATE INVENTORY DATA
+# 3. LOAD DATA AND SET UP SESSION STATE
 # ==========================================================
 
 @st.cache_data
-def load_inventory():
-    # The CSV file must be in the same GitHub folder as app.py.
-    data = pd.read_csv("inventory_replenishment_results.csv")
-
-    # Remove extra spaces in column headers.
-    data.columns = data.columns.str.strip()
-
-    required_columns = [
-        "Product_ID",
-        "SMA_7",
-        "MAE",
-        "Annual_Demand",
-        "EOQ",
-        "ROP",
-        "Current_Stock",
-        "Status",
-        "Order_Quantity",
-    ]
-
-    missing = [
-        col for col in required_columns
-        if col not in data.columns
-    ]
-
-    if missing:
-        raise ValueError(
-            "Missing CSV columns: " + ", ".join(missing)
-        )
-
-    # Ensure numeric calculations work correctly.
-    numeric_columns = [
-        "SMA_7",
-        "MAE",
-        "Annual_Demand",
-        "EOQ",
-        "ROP",
-        "Current_Stock",
-        "Order_Quantity",
-    ]
-
-    for col in numeric_columns:
-        data[col] = pd.to_numeric(
-            data[col],
-            errors="coerce"
-        ).fillna(0)
-
-    data["Product_ID"] = (
-        data["Product_ID"].astype(str).str.strip()
-    )
-
-    data["Status"] = (
-        data["Status"].astype(str).str.strip()
-    )
-
-    return data
+def load_base():
+    # Only Product_ID, SMA_7, MAE and Current_Stock are read from the CSV.
+    # EOQ, ROP and Status are recalculated live from the assumptions.
+    return model.load_base_data("inventory_replenishment_results.csv")
 
 
 try:
-    df = load_inventory()
-
+    base_df = load_base()
 except Exception as error:
     st.error("Unable to load inventory data.")
     st.code(str(error))
     st.stop()
 
-# ==========================================================
-# 4. RULE-BASED INVENTORY CHAT ASSISTANT
-# ==========================================================
+# Current model inputs. Shared by the dashboard and the chatbot.
+if "assumptions" not in st.session_state:
+    st.session_state.assumptions = model.DEFAULT_ASSUMPTIONS
 
-def inventory_assistant(question, data):
-    """
-    Answer inventory questions using the actual CSV.
+GREETING = (
+    "Hello! I'm your inventory replenishment assistant. I can tell you which "
+    "products to reorder, how many units to order, why, and what happens "
+    "if demand, lead time or costs change.\n\n"
+    "For what-if questions I'll ask you for the new value (for example "
+    "*demand +20%* or *lead time 14 days*). What would you like to know?"
+)
+if "messages" not in st.session_state:
+    st.session_state.messages = [{"role": "assistant", "content": GREETING}]
 
-    This assistant is rule-based. It does not call an AI API.
-    """
 
-    q = question.lower().strip()
+def get_secret(name):
+    """Read a setting from Streamlit secrets, then environment variables."""
+    try:
+        if name in st.secrets:
+            return st.secrets[name]
+    except Exception:
+        pass  # no secrets.toml file, which is normal when running locally
+    return os.environ.get(name)
 
-    # Find a specific product ID mentioned in the question.
-    product_matches = [
-        pid for pid in data["Product_ID"]
-        if pid.lower() in q
-    ]
 
-    if product_matches:
-        pid = product_matches[0]
+API_KEY = get_secret("GEMINI_API_KEY")
+MODEL_NAME = get_secret("GEMINI_MODEL") or DEFAULT_MODEL
+AI_ENABLED = bool(API_KEY)
 
-        item = data[
-            data["Product_ID"] == pid
-        ].iloc[0]
-
-        return (
-            f"**{pid}**\n\n"
-            f"- Current stock: {item['Current_Stock']:,.0f} units\n"
-            f"- Reorder point: {item['ROP']:,.0f} units\n"
-            f"- EOQ: {item['EOQ']:,.0f} units\n"
-            f"- Status: {item['Status']}\n"
-            f"- Recommended order: "
-            f"{item['Order_Quantity']:,.0f} units\n"
-            f"- Annual demand: "
-            f"{item['Annual_Demand']:,.1f} units"
-        )
-
-    # List products in the dataset.
-    if any(phrase in q for phrase in [
-        "what do we sell",
-        "what all we sell",
-        "list products",
-        "all products",
-        "product catalog",
-        "product list",
-    ]):
-        product_list = "\n".join(
-            f"- {pid}"
-            for pid in data["Product_ID"]
-        )
-
-        return (
-            f"**Products in the dataset:**\n\n"
-            f"{product_list}\n\n"
-            "The CSV contains product IDs, not product names."
-        )
-
-    # Show products with the highest demand.
-    if any(word in q for word in [
-        "forecast",
-        "demand",
-        "prediction",
-        "highest selling",
-        "highest demand",
-    ]):
-        top = data.nlargest(5, "Annual_Demand")
-
-        lines = "\n".join(
-            f"- {row['Product_ID']}: "
-            f"{row['Annual_Demand']:,.1f} units/year"
-            for _, row in top.iterrows()
-        )
-
-        return (
-            "**Top 5 products by estimated annual demand:**\n\n"
-            + lines
-        )
-
-    # Reorder questions.
-    if any(word in q for word in [
-        "reorder",
-        "replenish",
-        "restock",
-        "order",
-        "low stock",
-    ]):
-        items = data[data["Status"] == "Reorder"]
-
-        if items.empty:
-            return "No products are flagged for reordering."
-
-        total = int(items["Order_Quantity"].sum())
-
-        lines = "\n".join(
-            f"- {row['Product_ID']}: "
-            f"{row['Order_Quantity']:,.0f} units"
-            for _, row in items.iterrows()
-        )
-
-        return (
-            f"**{len(items)} products need reordering.**\n\n"
-            f"Recommended total: **{total:,} units**.\n\n"
-            f"{lines}"
-        )
-
-    # General stock questions.
-    if any(word in q for word in [
-        "stock",
-        "inventory",
-        "available",
-        "units",
-    ]):
-        sufficient = (
-            data["Status"] == "Sufficient Stock"
-        ).sum()
-
-        reorder = (
-            data["Status"] == "Reorder"
-        ).sum()
-
-        total_units = int(
-            data["Current_Stock"].sum()
-        )
-
-        return (
-            f"**Inventory summary**\n\n"
-            f"- Products: {len(data)}\n"
-            f"- Need reorder: {reorder}\n"
-            f"- Sufficient stock: {sufficient}\n"
-            f"- Current units: {total_units:,}"
-        )
-
-    # Default guidance for unsupported questions.
-    return (
-        "I can help you analyze your inventory CSV.\n\n"
-        "Try asking:\n\n"
-        "- Which products need reordering?\n"
-        "- What is the stock level of HOBBIES_1_001?\n"
-        "- Which products have the highest demand?\n"
-        "- List all products."
-    )
+# Recalculate the plan for the current assumptions.
+assumptions = st.session_state.assumptions
+plan = model.calculate_plan(base_df, assumptions)
 
 # ==========================================================
-# 5. APPLICATION HEADER
+# 4. HEADER
 # ==========================================================
 
 st.title("AI Inventory Replenishment Planner")
+st.caption("M5 Sales Forecasting · SMA · EOQ · Reorder Point · AI Assistant")
 
-st.caption(
-    "M5 Sales Forecasting | Inventory Optimization | Milestone 2"
-)
+if assumptions != model.DEFAULT_ASSUMPTIONS:
+    st.info(
+        "Showing results for **modified assumptions**: "
+        f"S = ${assumptions.ordering_cost:g}, H = ${assumptions.holding_cost:g}, "
+        f"lead time = {assumptions.lead_time_days:g} days, "
+        f"demand change = {assumptions.demand_change_pct:+g}%, "
+        f"service level = {assumptions.service_level:g}%. "
+        "Use *Reset to defaults* to return to the Milestone 2 baseline."
+    )
 
 st.divider()
 
-# ==========================================================
-# 6. TWO-PANEL LAYOUT
-# ==========================================================
-
-# Dashboard occupies approximately 65% of the page.
-# Chat assistant occupies approximately 35%.
-dashboard_col, chat_col = st.columns(
-    [1.8, 1],
-    gap="large"
-)
+dashboard_col, chat_col = st.columns([1.8, 1], gap="large")
 
 # ==========================================================
-# 7. LEFT PANEL: INVENTORY DASHBOARD
+# 5. LEFT PANEL: DASHBOARD
 # ==========================================================
 
 with dashboard_col:
 
     st.header("Inventory Dashboard")
 
-    st.caption(
-        "Track inventory performance and replenishment needs."
-    )
-
-    # Filters appear inside the dashboard rather than sidebar.
-    filter_col1, filter_col2 = st.columns(2)
-
-    with filter_col1:
-        status_filter = st.selectbox(
-            "Inventory status",
-            ["All", "Reorder", "Sufficient Stock"]
+    # ------------------------------------------------------
+    # 5a. MODEL INPUTS (user can revise and rerun)
+    # ------------------------------------------------------
+    with st.expander("⚙️ Model inputs & assumptions", expanded=False):
+        st.caption(
+            "M5 does not include costs, lead times or stock levels, so these are "
+            "labelled assumptions. Change them and click **Recalculate**."
         )
+        with st.form("assumptions_form"):
+            c1, c2, c3 = st.columns(3)
+            ordering_cost = c1.number_input(
+                "Ordering cost S ($/order)", value=float(assumptions.ordering_cost), step=5.0)
+            holding_cost = c2.number_input(
+                "Holding cost H ($/unit/year)", value=float(assumptions.holding_cost), step=0.5)
+            lead_time = c3.number_input(
+                "Lead time L (days)", value=float(assumptions.lead_time_days), step=1.0)
 
-    with filter_col2:
-        product_search = st.text_input(
-            "Search product ID",
-            placeholder="HOBBIES_1_001"
-        )
-
-    # Apply filters to dashboard only.
-    filtered_df = df.copy()
-
-    if status_filter != "All":
-        filtered_df = filtered_df[
-            filtered_df["Status"] == status_filter
-        ]
-
-    if product_search:
-        filtered_df = filtered_df[
-            filtered_df["Product_ID"].str.contains(
-                product_search,
-                case=False,
-                regex=False
+            c4, c5 = st.columns(2)
+            demand_change = c4.number_input(
+                "Demand change (%)", value=float(assumptions.demand_change_pct), step=5.0,
+                help="Scenario: +20 means every product sells 20% more than the SMA forecast.")
+            service_level = c5.selectbox(
+                "Safety stock service level",
+                model.ALLOWED_SERVICE_LEVELS,
+                index=model.ALLOWED_SERVICE_LEVELS.index(assumptions.service_level),
+                format_func=lambda v: "None (Milestone 2 model)" if v == 0 else f"{v:g}%",
+                help="Safety stock = z × 1.25 × MAE × √L",
             )
-        ]
 
-    # Calculate dashboard KPIs.
-    reorder_df = filtered_df[
-        filtered_df["Status"] == "Reorder"
-    ]
+            b1, b2 = st.columns(2)
+            recalc = b1.form_submit_button("Recalculate", width="stretch")
+            reset = b2.form_submit_button("Reset to defaults", width="stretch")
 
-    sufficient_df = filtered_df[
-        filtered_df["Status"] == "Sufficient Stock"
-    ]
+        if recalc:
+            try:
+                st.session_state.assumptions = model.validate_assumptions(
+                    ordering_cost=ordering_cost, holding_cost=holding_cost,
+                    lead_time_days=lead_time, demand_change_pct=demand_change,
+                    service_level=service_level,
+                )
+                st.rerun()
+            except model.InputError as err:
+                # Invalid input: explain and keep the previous values.
+                st.error(f"Please fix the inputs: {err}")
+        if reset:
+            st.session_state.assumptions = model.DEFAULT_ASSUMPTIONS
+            st.rerun()
 
-    total_products = len(filtered_df)
-    reorder_count = len(reorder_df)
-    sufficient_count = len(sufficient_df)
+    # ------------------------------------------------------
+    # 5b. FILTERS
+    # ------------------------------------------------------
+    f1, f2 = st.columns(2)
+    status_filter = f1.selectbox("Inventory status", ["All", "Reorder", "Sufficient Stock"])
+    product_search = f2.text_input("Search product ID", placeholder="HOBBIES_1_001")
 
-    recommended_units = int(
-        reorder_df["Order_Quantity"].sum()
-    )
+    filtered = plan.copy()
+    if status_filter != "All":
+        filtered = filtered[filtered["Status"] == status_filter]
+    if product_search:
+        filtered = filtered[filtered["Product_ID"].str.contains(
+            product_search.strip(), case=False, regex=False)]
 
-    # Four metric cards in a 2x2 grid for readability.
-    m1, m2 = st.columns(2)
-
-    with m1:
-        st.metric("Products Shown", total_products)
-
-    with m2:
-        st.metric("Need Reorder", reorder_count)
-
-    m3, m4 = st.columns(2)
-
-    with m3:
-        st.metric("Sufficient Stock", sufficient_count)
-
-    with m4:
-        st.metric(
-            "Recommended Order Units",
-            f"{recommended_units:,}"
-        )
+    # ------------------------------------------------------
+    # 5c. KPI CARDS
+    # ------------------------------------------------------
+    summary = model.summarize(filtered)
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("Products Shown", summary["products"])
+    k2.metric("Need Reorder", summary["need_reorder"])
+    k3.metric("Sufficient Stock", summary["sufficient_stock"])
+    k4.metric("Recommended Order Units", f"{summary['recommended_order_units']:,}")
 
     st.divider()
 
     # ------------------------------------------------------
-    # INVENTORY CHARTS
+    # 5d. CHARTS
     # ------------------------------------------------------
-
-    st.subheader("Stock Status")
-
-    if not filtered_df.empty:
-
-        counts = (
-            filtered_df["Status"]
-            .value_counts()
-            .rename_axis("Status")
-            .reset_index(name="Products")
-        )
-
-        # No custom chart color arguments:
-        # this avoids the earlier Streamlit TypeError.
-        st.bar_chart(
-            counts,
-            x="Status",
-            y="Products"
-        )
-
-    else:
+    if filtered.empty:
         st.info("No products match your filters.")
-
-    st.subheader("Largest Recommended Orders")
-
-    if not reorder_df.empty:
-
-        top_orders = (
-            reorder_df.nlargest(
-                10, "Order_Quantity"
-            )[["Product_ID", "Order_Quantity"]]
-            .set_index("Product_ID")
+    else:
+        st.subheader("Current Stock vs. Reorder Point")
+        st.caption("Products whose stock bar is at or below the ROP bar need reordering.")
+        st.bar_chart(
+            filtered.set_index("Product_ID")[["Current_Stock", "ROP"]],
+            stack=False, height=320,
         )
 
-        st.bar_chart(top_orders)
-
-    else:
-        st.info("No reorder items in this selection.")
+        ch1, ch2 = st.columns(2)
+        with ch1:
+            st.subheader("Stock Status")
+            counts = (filtered["Status"].value_counts()
+                      .rename_axis("Status").reset_index(name="Products"))
+            st.bar_chart(counts, x="Status", y="Products", height=260)
+        with ch2:
+            st.subheader("Largest Recommended Orders")
+            reorder_rows = filtered[filtered["Status"] == "Reorder"]
+            if reorder_rows.empty:
+                st.info("No reorder items in this selection.")
+            else:
+                st.bar_chart(
+                    reorder_rows.nlargest(10, "Order_Quantity")
+                    .set_index("Product_ID")[["Order_Quantity"]],
+                    height=260,
+                )
 
     # ------------------------------------------------------
-    # PRODUCT INVENTORY TABLE
+    # 5e. PRODUCT TABLE + DOWNLOAD
     # ------------------------------------------------------
-
     st.subheader("Product Inventory Details")
-
-    table_columns = [
-        "Product_ID",
-        "Current_Stock",
-        "ROP",
-        "EOQ",
-        "Annual_Demand",
-        "Status",
-        "Order_Quantity",
-    ]
-
-    # Streamlit renders the interactive table.
+    table_cols = ["Product_ID", "Current_Stock", "ROP", "Safety_Stock", "EOQ",
+                  "Daily_Demand", "Annual_Demand", "Days_of_Cover", "Status", "Order_Quantity"]
     st.dataframe(
-        filtered_df[table_columns],
-        use_container_width=True,
-        hide_index=True,
-        height=350,
+        filtered[table_cols],
+        width="stretch", hide_index=True, height=350,
+        column_config={
+            "Daily_Demand": st.column_config.NumberColumn("Daily Demand", format="%.2f"),
+            "Annual_Demand": st.column_config.NumberColumn("Annual Demand", format="%.1f"),
+            "Safety_Stock": st.column_config.NumberColumn("Safety Stock", format="%.2f"),
+            "Days_of_Cover": st.column_config.NumberColumn("Days of Cover", format="%.1f"),
+        },
     )
-
-    # Download filtered data.
-    csv_bytes = filtered_df.to_csv(
-        index=False
-    ).encode("utf-8")
-
     st.download_button(
         "Download Inventory Results",
-        data=csv_bytes,
+        data=filtered.to_csv(index=False).encode("utf-8"),
         file_name="inventory_results_filtered.csv",
         mime="text/csv",
     )
 
+    # ------------------------------------------------------
+    # 5f. PRODUCT DRILL-DOWN: shows each calculation step
+    # ------------------------------------------------------
+    st.subheader("How a Recommendation Is Calculated")
+    chosen = st.selectbox("Choose a product", plan["Product_ID"].tolist())
+    detail = InventoryTools(base_df, assumptions).get_product_details(chosen)
+    d1, d2, d3, d4 = st.columns(4)
+    d1.metric("Forecast (units/day)", f"{detail['daily_demand_forecast']:.2f}")
+    d2.metric("Reorder Point", detail["reorder_point"])
+    d3.metric("EOQ", detail["eoq"])
+    d4.metric("Order Now", detail["recommended_order_units"])
+    steps = detail["calculation_steps"]
+    st.markdown(
+        f"1. **Annual demand:** `{steps['annual_demand']}`\n"
+        f"2. **EOQ:** `{steps['eoq']}`\n"
+        f"3. **Reorder point:** `{steps['reorder_point']}`\n"
+        f"4. **Decision:** `{steps['decision_rule']}`\n\n"
+        f"Forecast accuracy (MAE of the 7-day SMA): **{detail['forecast_mae']:.3f} units/day**"
+    )
+
     st.caption(
-        "Inventory values are from the saved CSV snapshot."
+        "Data: M5 Forecasting (Walmart store TX_1, 20 HOBBIES products). "
+        "Stock levels are simulated; costs and lead time are assumptions."
     )
 
 # ==========================================================
-# 8. RIGHT PANEL: CHAT ASSISTANT
+# 6. RIGHT PANEL: INVENTORY ASSISTANT
 # ==========================================================
 
 with chat_col:
 
     st.header("Inventory Assistant")
 
-    st.caption(
-        "Ask questions about stock, replenishment, "
-        "and demand forecasts."
-    )
+    if AI_ENABLED:
+        st.markdown(
+            f'<span class="mode-badge mode-llm">● AI agent: Gemini ({MODEL_NAME})</span>',
+            unsafe_allow_html=True)
+        st.caption("The model chooses a tool, Python runs the calculation, "
+                   "the model explains the result.")
+    else:
+        st.markdown(
+            '<span class="mode-badge mode-offline">● Offline mode: rule-based, no AI</span>',
+            unsafe_allow_html=True)
+        st.caption("No GEMINI_API_KEY is configured, so answers come from simple "
+                   "keyword rules. Add a key in Streamlit secrets to enable the AI agent.")
 
-    st.divider()
-
-    # Initialize chat history once per user session.
-    if "messages" not in st.session_state:
-        st.session_state.messages = [
-            {
-                "role": "assistant",
-                "content": (
-                    "Hello! I can help you explore your "
-                    "inventory data. What would you like "
-                    "to know?"
-                ),
-            }
-        ]
-
-    # Clear chat button.
     if st.button("Clear conversation"):
-        st.session_state.messages = [
-            {
-                "role": "assistant",
-                "content": (
-                    "Conversation cleared. "
-                    "What would you like to know?"
-                ),
-            }
-        ]
+        st.session_state.messages = [{"role": "assistant", "content": GREETING}]
+        st.rerun()
 
-    # Show the conversation inside a dedicated chat panel.
-    chat_container = st.container(
-        height=570,
-        border=True
-    )
+    # Conversation, with the tools behind each answer shown for transparency.
+    chat_box = st.container(height=560, border=True)
+    with chat_box:
+        for msg in st.session_state.messages:
+            with st.chat_message(msg["role"]):
+                st.markdown(msg["content"])
+                if msg.get("tool_calls"):
+                    with st.expander(f"🔧 Tools used ({len(msg['tool_calls'])})"):
+                        for name, args, result in msg["tool_calls"]:
+                            st.markdown(f"**{name}**(`{args}`)")
+                            st.json(result, expanded=False)
+                if msg.get("note"):
+                    st.caption(msg["note"])
 
-    with chat_container:
-        for message in st.session_state.messages:
+    # Suggested questions (useful for demos).
+    suggestions = ["Which products should I prioritize?",
+                   "What if demand increases by 20%?",
+                   "Why does HOBBIES_1_019 need replenishment?"]
+    picked = None
+    s_cols = st.columns(len(suggestions))
+    for col, text in zip(s_cols, suggestions):
+        if col.button(text, width="stretch"):
+            picked = text
 
-            with st.chat_message(message["role"]):
-                st.markdown(message["content"])
+    # A form keeps the input inside the right column.
+    with st.form("chat_form", clear_on_submit=True):
+        typed = st.text_input("Your question", placeholder="Ask about your inventory...")
+        sent = st.form_submit_button("Send message", width="stretch")
 
-    # Using st.form keeps the input in the RIGHT column,
-    # instead of Streamlit's default full-page chat footer.
-    with st.form(
-        "inventory_chat_form",
-        clear_on_submit=True
-    ):
+    question = picked or (typed.strip() if sent else "")
 
-        question = st.text_input(
-            "Your question",
-            placeholder="Ask about your inventory...",
-        )
+    if question:
+        history = [{"role": m["role"], "content": m["content"]}
+                   for m in st.session_state.messages]
+        st.session_state.messages.append({"role": "user", "content": question})
 
-        submitted = st.form_submit_button(
-            "Send message",
-            use_container_width=True
-        )
+        tools = InventoryTools(base_df, st.session_state.assumptions)
+        note = None
 
-    if submitted and question.strip():
+        with st.spinner("Thinking..."):
+            if AI_ENABLED:
+                try:
+                    reply = GeminiAgent(API_KEY, MODEL_NAME).ask(question, history, tools)
+                except Exception as err:
+                    # Never fail silently: say Gemini failed and answer offline.
+                    reply = OfflineAssistant().ask(question, history, tools)
+                    note = (f"Gemini request failed ({type(err).__name__}: {str(err)[:150]}). "
+                            "This answer came from offline mode.")
+            else:
+                reply = OfflineAssistant().ask(question, history, tools)
 
-        # Add user question to history.
-        st.session_state.messages.append({
-            "role": "user",
-            "content": question.strip()
-        })
+        # If the agent changed the assumptions, the dashboard follows.
+        st.session_state.assumptions = tools.assumptions
 
-        # Generate answer from the full inventory dataset.
-        answer = inventory_assistant(
-            question,
-            df
-        )
-
-        # Add assistant response to history.
         st.session_state.messages.append({
             "role": "assistant",
-            "content": answer
+            "content": reply.text,
+            "tool_calls": reply.tool_calls,
+            "note": note,
         })
-
-        # Refresh chat display.
         st.rerun()
