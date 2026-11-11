@@ -60,7 +60,7 @@ st.markdown("""
     /* Fonts: Playfair Display (elegant serif) for the main title,
        Montserrat (bold, modern retail style) for section headings,
        DM Sans (clean modern sans) for everything else. */
-    @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Montserrat:wght@600;700;800&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,700&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Montserrat:wght@600;700;800&family=Syne:wght@700;800&family=Space+Grotesk:wght@600;700&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,700&display=swap');
     html, body, .stApp, .stMarkdown, .stCaption, p, li, label, input, textarea, button,
     [data-testid="stMetricValue"], [data-testid="stMetricLabel"], [data-baseweb="tab"] {
         font-family: 'DM Sans', 'Helvetica Neue', Arial, sans-serif !important;
@@ -72,6 +72,14 @@ st.markdown("""
     .block-container { max-width: 1800px; padding-top: 3.2rem;
                        padding-left: 2rem; padding-right: 2rem; }
     h2 { font-size: 1.45rem; text-transform: uppercase; letter-spacing: 0.06em; }
+
+    /* Panel headings: each side has its own typeface */
+    h2.panel-title { font-size: 2.1rem; line-height: 1.15; margin: 0.4rem 0 0.8rem 0;
+                     text-transform: uppercase; color: #111; }
+    h2.dash-title { font-family: 'Syne', 'Helvetica Neue', Arial, sans-serif !important;
+                    font-weight: 800; letter-spacing: 0.03em; }
+    h2.assist-title { font-family: 'Space Grotesk', 'Helvetica Neue', Arial, sans-serif !important;
+                      font-weight: 700; letter-spacing: 0.01em; }
 
     /* Header band */
     .hero { background: #111; color: #fff; padding: 22px 28px; margin-bottom: 18px;
@@ -319,7 +327,7 @@ dashboard_col, chat_col = st.columns([1.8, 1], gap="large")
 
 with dashboard_col:
 
-    st.header("Inventory Dashboard", anchor=False)
+    st.markdown('<h2 class="panel-title dash-title">Inventory Dashboard</h2>', unsafe_allow_html=True)
 
     # ------------------------------------------------------
     # 5a. FILTERS + KPI CARDS (shared by all tabs)
@@ -551,7 +559,7 @@ with dashboard_col:
 
 with chat_col:
 
-    st.header("Inventory Assistant", anchor=False)
+    st.markdown('<h2 class="panel-title assist-title">Inventory Assistant</h2>', unsafe_allow_html=True)
 
     if AI_ENABLED:
         st.markdown(
