@@ -91,7 +91,7 @@ st.markdown("""
     [data-testid="stChatMessageContent"] { background: #fff; border: 1px solid #e5e5e5;
                                            padding: 10px 14px; min-width: 0; overflow-wrap: anywhere; }
     /* Wide answers (tables) scroll inside their own bubble, never the whole chat. */
-    .st-key-advisor_chat, .st-key-advisor_chat > div { overflow-x: hidden !important; }
+    .st-key-advisor_chat { overflow-x: hidden !important; }   /* one scroll: the chat box only */
     [data-testid="stChatMessageContent"] table { display: block; max-width: 100%; overflow-x: auto;
                                                  font-size: 0.85rem; }
     [data-testid="stChatMessageContent"] th, [data-testid="stChatMessageContent"] td {
