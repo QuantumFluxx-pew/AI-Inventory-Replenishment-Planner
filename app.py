@@ -5,21 +5,37 @@ Left panel : inventory dashboard (KPIs, charts, table, product drill-down)
 Right panel: Inventory Assistant chat
 
 Files this app uses:
-    inventory_model.py   - SMA / EOQ / ROP calculations (the embedded models)
+    inventory_model.py   - SMA / MAE / EOQ / ROP calculations (the embedded models)
     agent.py             - Gemini tool-calling agent + offline fallback
-    inventory_replenishment_results.csv - product forecasts and simulated stock
+    data/products.csv    - 18 H&M products, with simulated current stock
+    data/daily_sales.csv - one year of real H&M daily unit sales
+    images/<id>.jpg      - product photo thumbnails
 
 Run locally:   streamlit run app.py
 """
 
+import base64
+import importlib
 import os
 
 import altair as alt
 import pandas as pd
 import streamlit as st
 
+import agent as agent_module
 import inventory_model as model
-from agent import DEFAULT_MODEL, GeminiAgent, InventoryTools, OfflineAssistant
+
+# Streamlit Cloud reloads app.py after a deploy but can keep older copies of
+# the helper modules in memory, which breaks the app. Reload them if stale.
+if getattr(model, "MODEL_VERSION", None) != getattr(agent_module, "MODEL_VERSION", None) \
+        or not hasattr(model, "ALLOWED_SMA_WINDOWS"):
+    model = importlib.reload(model)
+    agent_module = importlib.reload(agent_module)
+
+DEFAULT_MODEL = agent_module.DEFAULT_MODEL
+GeminiAgent = agent_module.GeminiAgent
+InventoryTools = agent_module.InventoryTools
+OfflineAssistant = agent_module.OfflineAssistant
 
 # ==========================================================
 # 1. PAGE CONFIGURATION
@@ -82,27 +98,39 @@ st.markdown("""
 # ==========================================================
 
 @st.cache_data
-def load_base():
-    # Only Product_ID, SMA_7, MAE and Current_Stock are read from the CSV.
-    # EOQ, ROP and Status are recalculated live from the assumptions.
-    return model.load_base_data("inventory_replenishment_results.csv")
+def load_data(version):
+    """Products + forecasts (SMA and MAE for every window) and daily sales.
+    `version` is only here so a new deploy never reuses an old cache."""
+    return model.load_base_data(), model.load_sales()
+
+
+@st.cache_data
+def photo_uri(product_id):
+    """Product photo as a data URI, so tables and chat can show it."""
+    try:
+        with open(model.image_path(product_id), "rb") as f:
+            return "data:image/jpeg;base64," + base64.b64encode(f.read()).decode()
+    except OSError:
+        return None
 
 
 try:
-    base_df = load_base()
+    base_df, sales_df = load_data(model.MODEL_VERSION)
 except Exception as error:
     st.error("Unable to load inventory data.")
     st.code(str(error))
     st.stop()
 
 # Current model inputs. Shared by the dashboard and the chatbot.
-if "assumptions" not in st.session_state:
+# Reset them if they come from an older version of the app.
+if not isinstance(st.session_state.get("assumptions"), model.Assumptions):
     st.session_state.assumptions = model.DEFAULT_ASSUMPTIONS
 
 GREETING = (
-    "Hello! I'm your inventory replenishment assistant. I can tell you which "
-    "products to reorder, how many units to order, why, and what happens "
-    "if demand, lead time or costs change.\n\n"
+    "Hello! I'm your inventory replenishment assistant for 18 H&M products, "
+    "from basics like the *Brit Baby Tee* to the *Pluto RW slacks*. I can tell "
+    "you which products to reorder, how many units to order, why, and what "
+    "happens if demand, lead time, costs or the forecast window change.\n\n"
     "For what-if questions I'll ask you for the new value (for example "
     "*demand +20%* or *lead time 14 days*). What would you like to know?"
 )
@@ -157,7 +185,7 @@ def stock_vs_rop_chart(data):
     base = alt.Chart(data).encode(
         y=alt.Y("Name:N", sort=None, title=None, axis=alt.Axis(labelOverlap=False)),
         tooltip=[
-            alt.Tooltip("Name", title="Product"), alt.Tooltip("Product_ID", title="M5 ID"),
+            alt.Tooltip("Name", title="Product"), alt.Tooltip("Product_ID", title="H&M article ID"),
             alt.Tooltip("Current_Stock", title="Current stock"),
             alt.Tooltip("ROP", title="Reorder point"),
             alt.Tooltip("Status"),
@@ -182,7 +210,7 @@ def days_of_cover_chart(data, lead_time):
     bars = base.mark_bar(cornerRadiusEnd=4, height={"band": 0.7}).encode(
         x=alt.X("Days_of_Cover:Q", title="Days of stock left at forecast demand"),
         color=alt.Color("Status:N", scale=STATUS_COLORS),
-        tooltip=[alt.Tooltip("Name", title="Product"), alt.Tooltip("Product_ID", title="M5 ID"),
+        tooltip=[alt.Tooltip("Name", title="Product"), alt.Tooltip("Product_ID", title="H&M article ID"),
                  alt.Tooltip("Days_of_Cover", title="Days of cover"),
                  alt.Tooltip("Status")],
     )
@@ -205,19 +233,37 @@ def order_quantity_chart(data):
                          height={"band": 0.7}).encode(
         x=alt.X("Order_Quantity:Q", title="Units to order (EOQ)",
                 axis=alt.Axis(tickCount=6)),
-        tooltip=[alt.Tooltip("Name", title="Product"), alt.Tooltip("Product_ID", title="M5 ID"),
+        tooltip=[alt.Tooltip("Name", title="Product"), alt.Tooltip("Product_ID", title="H&M article ID"),
                  alt.Tooltip("Order_Quantity", title="Units to order")],
     )
     values = base.mark_text(align="left", dx=4, color="#202b43", fontSize=12).encode(
         x="Order_Quantity:Q", text="Order_Quantity:Q")
     return _style(bars + values, height=max(120, 28 * len(top)))
 
+
+def sales_history_chart(daily_sales, window, days=90):
+    """Actual daily units sold (bars) vs. the one-day-ahead moving-average
+    forecast (line) for the last `days` days. Shows how well the SMA tracks."""
+    forecast = model.sma_backtest(daily_sales.reset_index(drop=True), window).values
+    frame = pd.DataFrame({"Date": daily_sales.index, "Actual units sold": daily_sales.values,
+                          f"{window}-day SMA forecast": forecast}).tail(days)
+    long = frame.melt("Date", var_name="Series", value_name="Units")
+    colors = alt.Scale(domain=["Actual units sold", f"{window}-day SMA forecast"],
+                       range=["#9ec5f0", "#1b4f9c"])
+    tips = [alt.Tooltip("Date:T"), alt.Tooltip("Series:N"), alt.Tooltip("Units:Q", format=".1f")]
+    bars = alt.Chart(long[long["Series"] == "Actual units sold"]).mark_bar(width={"band": 0.8}).encode(
+        x=alt.X("Date:T", title=None), y=alt.Y("Units:Q", title="Units per day"),
+        color=alt.Color("Series:N", scale=colors), tooltip=tips)
+    line = alt.Chart(long[long["Series"] != "Actual units sold"]).mark_line(strokeWidth=2).encode(
+        x="Date:T", y="Units:Q", color=alt.Color("Series:N", scale=colors), tooltip=tips)
+    return _style(bars + line, height=240)
+
 # ==========================================================
 # 4. HEADER
 # ==========================================================
 
 st.title("AI Inventory Replenishment Planner")
-st.caption("M5 Sales Forecasting · SMA · EOQ · Reorder Point · AI Assistant")
+st.caption("H&M Sales Forecasting · Moving Average · EOQ · Reorder Point · AI Assistant")
 
 if assumptions != model.DEFAULT_ASSUMPTIONS:
     st.info(
@@ -225,8 +271,9 @@ if assumptions != model.DEFAULT_ASSUMPTIONS:
         f"S = ${assumptions.ordering_cost:g}, H = ${assumptions.holding_cost:g}, "
         f"lead time = {assumptions.lead_time_days:g} days, "
         f"demand change = {assumptions.demand_change_pct:+g}%, "
-        f"service level = {assumptions.service_level:g}%. "
-        "Use *Reset to defaults* to return to the Milestone 2 baseline."
+        f"service level = {assumptions.service_level:g}%, "
+        f"forecast window = {assumptions.sma_window} days. "
+        "Use *Reset to defaults* to return to the baseline."
     )
 
 st.divider()
@@ -246,8 +293,8 @@ with dashboard_col:
     # ------------------------------------------------------
     with st.expander("⚙️ Model inputs & assumptions", expanded=False):
         st.caption(
-            "M5 does not include costs, lead times or stock levels, so these are "
-            "labelled assumptions. Change them and click **Recalculate**."
+            "The H&M data has real sales but no costs, lead times or stock levels, "
+            "so these are labelled assumptions. Change them and click **Recalculate**."
         )
         with st.form("assumptions_form"):
             c1, c2, c3 = st.columns(3)
@@ -258,7 +305,7 @@ with dashboard_col:
             lead_time = c3.number_input(
                 "Lead time L (days)", value=float(assumptions.lead_time_days), step=1.0)
 
-            c4, c5 = st.columns(2)
+            c4, c5, c6 = st.columns(3)
             demand_change = c4.number_input(
                 "Demand change (%)", value=float(assumptions.demand_change_pct), step=5.0,
                 help="Scenario: +20 means every product sells 20% more than the SMA forecast.")
@@ -266,8 +313,14 @@ with dashboard_col:
                 "Safety stock service level",
                 model.ALLOWED_SERVICE_LEVELS,
                 index=model.ALLOWED_SERVICE_LEVELS.index(assumptions.service_level),
-                format_func=lambda v: "None (Milestone 2 model)" if v == 0 else f"{v:g}%",
+                format_func=lambda v: "None" if v == 0 else f"{v:g}%",
                 help="Safety stock = z × 1.25 × MAE × √L",
+            )
+            sma_window = c6.selectbox(
+                "Forecast window (days)",
+                model.ALLOWED_SMA_WINDOWS,
+                index=model.ALLOWED_SMA_WINDOWS.index(assumptions.sma_window),
+                help="How many recent days the moving-average forecast averages.",
             )
 
             b1, b2 = st.columns(2)
@@ -279,7 +332,7 @@ with dashboard_col:
                 st.session_state.assumptions = model.validate_assumptions(
                     ordering_cost=ordering_cost, holding_cost=holding_cost,
                     lead_time_days=lead_time, demand_change_pct=demand_change,
-                    service_level=service_level,
+                    service_level=service_level, sma_window=sma_window,
                 )
                 st.rerun()
             except model.InputError as err:
@@ -294,16 +347,17 @@ with dashboard_col:
     # ------------------------------------------------------
     f1, f2 = st.columns(2)
     status_filter = f1.selectbox("Inventory status", ["All", "Reorder", "Sufficient Stock"])
-    product_search = f2.text_input("Search product", placeholder="Item 019 or HOBBIES_1_019")
+    product_search = f2.text_input("Search product", placeholder="e.g. tee, slacks, socks")
 
     filtered = plan.copy()
     if status_filter != "All":
         filtered = filtered[filtered["Status"] == status_filter]
     if product_search:
-        # Match either the friendly name or the M5 ID.
+        # Match the product name, its type (e.g. 'socks') or its H&M article ID.
         term = product_search.strip()
         filtered = filtered[
             filtered["Name"].str.contains(term, case=False, regex=False)
+            | filtered["Product_Type"].str.contains(term, case=False, regex=False)
             | filtered["Product_ID"].str.contains(term, case=False, regex=False)]
 
     # ------------------------------------------------------
@@ -358,19 +412,21 @@ with dashboard_col:
     table = filtered.copy()
     table["Status"] = table["Status"].map(
         {"Reorder": "🔴 Reorder", "Sufficient Stock": "🟢 Sufficient"})
-    table_cols = ["Name", "Status", "Current_Stock", "ROP", "Order_Quantity",
-                  "EOQ", "Days_of_Cover", "Sell_Price", "Daily_Demand", "Annual_Demand",
-                  "Safety_Stock", "Product_ID"]
+    table["Photo"] = table["Product_ID"].map(photo_uri)
+    table_cols = ["Photo", "Name", "Product_Type", "Status", "Current_Stock", "ROP",
+                  "Order_Quantity", "EOQ", "Days_of_Cover", "Daily_Demand", "MAE",
+                  "Annual_Demand", "Safety_Stock", "Product_ID"]
     st.dataframe(
         table[table_cols],
-        width="stretch", hide_index=True, height=360,
+        width="stretch", hide_index=True, height=420, row_height=56,
         column_config={
-            "Name": st.column_config.TextColumn(
-                "Product", help="Walmart hid real product names in M5; this is category + item number"),
-            "Product_ID": st.column_config.TextColumn("M5 ID"),
-            "Sell_Price": st.column_config.NumberColumn(
-                "Shelf Price", format="$%.2f",
-                help="Real M5 price at store TX_1 (latest week). Shown for context; not used in EOQ/ROP"),
+            "Photo": st.column_config.ImageColumn("Photo", width="small"),
+            "Name": st.column_config.TextColumn("Product"),
+            "Product_Type": st.column_config.TextColumn("Type"),
+            "Product_ID": st.column_config.TextColumn("H&M Article ID"),
+            "MAE": st.column_config.NumberColumn(
+                "Forecast MAE", format="%.2f",
+                help="Average forecast error of the moving average, units/day (back-tested over the year)"),
             "Current_Stock": st.column_config.NumberColumn("Stock", help="Units on hand (simulated)"),
             "ROP": st.column_config.NumberColumn("Reorder Point", help="Reorder when stock ≤ this"),
             "Order_Quantity": st.column_config.NumberColumn("Order Now", help="Units to order (EOQ if reordering)"),
@@ -382,9 +438,12 @@ with dashboard_col:
             "Safety_Stock": st.column_config.NumberColumn("Safety Stock", format="%.1f"),
         },
     )
+    download_cols = ["Product_ID", "Name", "Product_Type", "Colour", "Current_Stock", "SMA",
+                     "MAE", "Daily_Demand", "Annual_Demand", "EOQ", "Safety_Stock", "ROP",
+                     "Days_of_Cover", "Status", "Order_Quantity", "Annual_Cost"]
     st.download_button(
         "Download Inventory Results",
-        data=filtered.to_csv(index=False).encode("utf-8"),
+        data=filtered[download_cols].to_csv(index=False).encode("utf-8"),
         file_name="inventory_results_filtered.csv",
         mime="text/csv",
     )
@@ -395,28 +454,44 @@ with dashboard_col:
     st.subheader("How a Recommendation Is Calculated")
     names = dict(zip(plan["Product_ID"], plan["Name"]))
     chosen = st.selectbox("Choose a product", plan["Product_ID"].tolist(),
-                          format_func=lambda pid: f"{names[pid]} ({pid})")
+                          format_func=lambda pid: names[pid])
     detail = InventoryTools(base_df, assumptions).get_product_details(chosen)
-    if detail.get("shelf_price_usd") is not None:
-        st.caption(f"{detail['name']} · M5 ID {detail['product_id']} · "
-                   f"shelf price ${detail['shelf_price_usd']:.2f} at store TX_1")
-    d1, d2, d3, d4 = st.columns(4)
-    d1.metric("Forecast (units/day)", f"{detail['daily_demand_forecast']:.2f}")
-    d2.metric("Reorder Point", detail["reorder_point"])
-    d3.metric("EOQ", detail["eoq"])
-    d4.metric("Order Now", detail["recommended_order_units"])
+
+    pic_col, info_col = st.columns([1, 3])
+    with pic_col:
+        if os.path.exists(model.image_path(chosen)):
+            st.image(model.image_path(chosen), width="stretch")
+    with info_col:
+        st.markdown(f"**{detail['name']}** · {detail['product_type']} · {detail['colour']}")
+        if detail["description"]:
+            st.caption(detail["description"])
+        st.caption(f"H&M article ID {detail['product_id']}")
+        d1, d2, d3, d4 = st.columns(4)
+        d1.metric("Forecast (units/day)", f"{detail['daily_demand_forecast']:.2f}")
+        d2.metric("Reorder Point", detail["reorder_point"])
+        d3.metric("EOQ", detail["eoq"])
+        d4.metric("Order Now", detail["recommended_order_units"])
+
     steps = detail["calculation_steps"]
     st.markdown(
-        f"1. **Annual demand:** `{steps['annual_demand']}`\n"
-        f"2. **EOQ:** `{steps['eoq']}`\n"
-        f"3. **Reorder point:** `{steps['reorder_point']}`\n"
-        f"4. **Decision:** `{steps['decision_rule']}`\n\n"
-        f"Forecast accuracy (MAE of the 7-day SMA): **{detail['forecast_mae']:.3f} units/day**"
+        f"1. **Forecast:** average of the last {detail['sma_window_days']} days of sales = "
+        f"`{detail['sma_forecast_units_per_day']} units/day`\n"
+        f"2. **Annual demand:** `{steps['annual_demand']}`\n"
+        f"3. **EOQ:** `{steps['eoq']}`\n"
+        f"4. **Reorder point:** `{steps['reorder_point']}`\n"
+        f"5. **Decision:** `{steps['decision_rule']}`"
     )
 
+    st.markdown(f"**Sales history vs. forecast (last 90 days)**: forecast accuracy "
+                f"(MAE over the year) = **{detail['forecast_mae_units_per_day']:.2f} units/day**")
+    history = sales_df[chosen]
+    chart = sales_history_chart(history, assumptions.sma_window)
+    st.altair_chart(chart, width="stretch", height=chart.height)
+
     st.caption(
-        "Data: M5 Forecasting (Walmart store TX_1, 20 HOBBIES products). "
-        "Stock levels are simulated; costs and lead time are assumptions."
+        "Data: H&M Personalized Fashion Recommendations (Kaggle), 18 steady-selling products, "
+        f"real daily sales {sales_df.index.min():%Y-%m-%d} to {sales_df.index.max():%Y-%m-%d}. "
+        "Current stock is simulated; costs and lead time are assumptions."
     )
 
 # ==========================================================
@@ -450,6 +525,12 @@ with chat_col:
         for msg in st.session_state.messages:
             with st.chat_message(msg["role"]):
                 st.markdown(msg["content"])
+                # Show the photo of any product the assistant looked up.
+                shown = {res.get("product_id") for name, _, res in msg.get("tool_calls", [])
+                         if name == "get_product_details" and isinstance(res, dict)}
+                for pid in sorted(p for p in shown if p):
+                    if os.path.exists(model.image_path(pid)):
+                        st.image(model.image_path(pid), width=110)
                 if msg.get("tool_calls"):
                     with st.expander(f"🔧 Tools used ({len(msg['tool_calls'])})"):
                         for name, args, result in msg["tool_calls"]:
@@ -461,7 +542,7 @@ with chat_col:
     # Suggested questions (useful for demos).
     suggestions = ["Which products should I prioritize?",
                    "What if demand increases by 20%?",
-                   "Why does HOBBIES_1_019 need replenishment?"]
+                   "Why does Lucy blouse need replenishment?"]
     picked = None
     s_cols = st.columns(len(suggestions))
     for col, text in zip(s_cols, suggestions):

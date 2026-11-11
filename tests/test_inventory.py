@@ -1,11 +1,11 @@
 """
-Automated tests for the AI Inventory & Replenishment Planner.
+Automated tests for the AI Inventory & Replenishment Planner (H&M data).
 
 Run from the project folder:   python -m pytest -v
 
 They check:
-  1. The embedded models reproduce the Milestone 2 results exactly.
-  2. The formulas are mathematically correct on hand-checked examples.
+  1. The data files are complete and clean.
+  2. The forecasting and inventory formulas are correct on hand-checked examples.
   3. Invalid or missing inputs are rejected with clear messages.
   4. The agent tools return correct data and ask for missing inputs.
 """
@@ -22,13 +22,17 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import inventory_model as m  # noqa: E402
 from agent import InventoryTools, OfflineAssistant  # noqa: E402
 
-CSV = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                   "inventory_replenishment_results.csv")
+BRIT_TEE = "0624486001"    # Brit Baby Tee: last 7 days sold 12, 9, 7, 11, 11, 4, 11 = 65 units
 
 
-@pytest.fixture
+@pytest.fixture(scope="module")
 def base():
-    return m.load_base_data(CSV)
+    return m.load_base_data()
+
+
+@pytest.fixture(scope="module")
+def sales():
+    return m.load_sales()
 
 
 @pytest.fixture
@@ -36,21 +40,40 @@ def tools(base):
     return InventoryTools(base, m.DEFAULT_ASSUMPTIONS)
 
 
-# ---------------------------------------------------------------- 1. baseline
-def test_reproduces_milestone2_csv(base):
-    plan = m.calculate_plan(base)
-    original = pd.read_csv(CSV)
-    for col in ["EOQ", "ROP", "Status", "Order_Quantity"]:
-        assert list(plan[col]) == list(original[col]), col
-    assert all(abs(plan["Annual_Demand"] - original["Annual_Demand"]) < 1e-9)
+def row(plan, pid):
+    return plan[plan["Product_ID"] == pid].iloc[0]
+
+
+# ---------------------------------------------------------------- 1. data
+def test_data_complete(base, sales):
+    assert len(base) == 18
+    assert len(sales) == 365                                   # one row per day, no gaps
+    assert set(base["Product_ID"]) <= set(sales.columns)       # every product has history
+    assert (sales >= 0).all().all()                            # no negative sales
+    assert base["Name"].is_unique
+    for pid in base["Product_ID"]:
+        assert os.path.exists(m.image_path(pid)), f"missing photo for {pid}"
 
 
 def test_baseline_summary(base):
     s = m.summarize(m.calculate_plan(base))
-    assert (s["need_reorder"], s["sufficient_stock"], s["recommended_order_units"]) == (12, 8, 1856)
+    assert (s["need_reorder"], s["sufficient_stock"], s["recommended_order_units"]) == (8, 10, 5048)
 
 
 # ---------------------------------------------------------------- 2. formulas
+def test_sma_forecast_by_hand(base, sales):
+    assert list(sales[BRIT_TEE].tail(7)) == [12, 9, 7, 11, 11, 4, 11]
+    assert row(base, BRIT_TEE)["SMA_7"] == pytest.approx(65 / 7)
+
+
+def test_brit_tee_full_calculation(base):
+    r = row(m.calculate_plan(base), BRIT_TEE)
+    assert r["ROP"] == 65                                       # ceil(65/7 * 7)
+    assert r["EOQ"] == math.ceil(math.sqrt(2 * (65 / 7) * 365 * 50 / 2))  # 412
+    assert r["EOQ"] == 412
+    assert r["Current_Stock"] == 65 and r["Status"] == "Reorder"  # stock == ROP -> reorder
+
+
 def test_eoq_hand_calculation():
     # sqrt(2 * 1000 * 50 / 2) = sqrt(50000) = 223.6 -> 224
     assert m.economic_order_quantity([1000], 50, 2)[0] == 224
@@ -65,16 +88,19 @@ def test_rop_ignores_float_noise():
 
 def test_safety_stock_formula():
     ss = m.safety_stock([1.0], 9, 95)[0]
-    expected = 1.6448536 * 1.25 * 1.0 * 3   # z * 1.25 * MAE * sqrt(9)
-    assert ss == pytest.approx(expected, rel=1e-6)
+    assert ss == pytest.approx(1.6448536 * 1.25 * 1.0 * 3, rel=1e-6)  # z * 1.25 * MAE * sqrt(9)
     assert m.safety_stock([1.0], 9, 0)[0] == 0
 
 
 def test_sma_and_mae():
-    sales = [0, 0, 0, 0, 0, 0, 0, 7]
-    assert m.sma_forecast(sales, 7) == 1.0
-    # only day 8 has a forecast: mean of days 1-7 = 0, error = 7
-    assert m.sma_mae(sales, 7) == 7.0
+    data = [0, 0, 0, 0, 0, 0, 0, 7]
+    assert m.sma_forecast(data, 7) == 1.0
+    assert m.sma_mae(data, 7) == 7.0   # only day 8 has a forecast (0); error = 7
+
+
+def test_window_changes_forecast(base, sales):
+    p28 = m.calculate_plan(base, m.validate_assumptions(sma_window=28))
+    assert row(p28, BRIT_TEE)["SMA"] == pytest.approx(sales[BRIT_TEE].tail(28).mean())
 
 
 def test_demand_increase_raises_eoq_and_rop(base):
@@ -82,20 +108,19 @@ def test_demand_increase_raises_eoq_and_rop(base):
     after = m.calculate_plan(base, m.validate_assumptions(demand_change_pct=20))
     assert (after["EOQ"] >= before["EOQ"]).all()
     assert (after["ROP"] >= before["ROP"]).all()
-    # EOQ scales with sqrt(1.2) for HOBBIES_1_019
-    row = after[after["Product_ID"] == "HOBBIES_1_019"].iloc[0]
-    assert row["EOQ"] == math.ceil(math.sqrt(2 * 7.571428571428571 * 1.2 * 365 * 50 / 2))
+    assert m.summarize(after)["recommended_order_units"] == 5962
 
 
 def test_longer_lead_time(base):
     s = m.summarize(m.calculate_plan(base, m.validate_assumptions(lead_time_days=14)))
-    assert s["need_reorder"] == 14   # HOBBIES_1_008 and _017 are added
+    assert s["need_reorder"] == 18   # 14 days > every product's days of cover
 
 
 # ---------------------------------------------------------------- 3. validation
 @pytest.mark.parametrize("bad", [
     {"lead_time_days": -3}, {"lead_time_days": 0}, {"ordering_cost": 0},
     {"holding_cost": "abc"}, {"demand_change_pct": -150}, {"service_level": 80},
+    {"sma_window": 5},
 ])
 def test_invalid_inputs_rejected(bad):
     with pytest.raises(m.InputError):
@@ -104,17 +129,14 @@ def test_invalid_inputs_rejected(bad):
 
 def test_product_lookup(base):
     plan = m.calculate_plan(base)
-    assert m.find_product(plan, "hobbies 1 16") == "HOBBIES_1_016"
-    assert m.find_product(plan, "HOBBIES-1-019") == "HOBBIES_1_019"
-    assert m.find_product(plan, "Hobbies Item 019") == "HOBBIES_1_019"
+    assert m.find_product(plan, "brit tee") == BRIT_TEE
+    assert m.find_product(plan, "624486001") == BRIT_TEE          # ID without leading zero
+    assert m.find_product(plan, "Brit Baby Tee") == BRIT_TEE
+    assert row(plan, m.find_product(plan, "socks"))["Name"] == "7p Basic Shaftless"
+    with pytest.raises(m.InputError, match="several"):
+        m.find_product(plan, "t-shirt")                           # 3 tees -> asks which
     with pytest.raises(m.InputError):
-        m.find_product(plan, "HOBBIES_1_099")
-
-
-def test_names_and_prices(base):
-    row = base[base["Product_ID"] == "HOBBIES_1_019"].iloc[0]
-    assert row["Name"] == "Hobbies Item 019"
-    assert row["Sell_Price"] == pytest.approx(0.48)   # real M5 price, store TX_1
+        m.find_product(plan, "unicorn hat")
 
 
 # ---------------------------------------------------------------- 4. agent tools
@@ -129,15 +151,21 @@ def test_what_if_does_not_change_dashboard(tools):
 
 
 def test_update_assumptions_changes_state(tools):
-    tools.call("update_assumptions", {"lead_time_days": 14})
-    assert tools.assumptions.lead_time_days == 14
+    tools.call("update_assumptions", {"lead_time_days": 14, "sma_window": 14})
+    assert (tools.assumptions.lead_time_days, tools.assumptions.sma_window) == (14, 14)
 
 
 def test_priority_order(tools):
     ranked = tools.call("prioritize_reorders", {"limit": 3})["ranked"]
-    assert [r["product_id"] for r in ranked] == ["HOBBIES_1_013", "HOBBIES_1_004", "HOBBIES_1_014"]
+    assert [r["name"] for r in ranked] == ["Harrison short sleeve top CN", "Milk RW slack", "Lucy blouse"]
 
 
 def test_offline_asks_for_missing_percentage(tools):
     reply = OfflineAssistant().ask("What happens if demand increases?", [], tools)
     assert "percentage" in reply.text and reply.tool_calls == []
+
+
+def test_offline_finds_product_by_name(tools):
+    reply = OfflineAssistant().ask("Why does Lucy blouse need replenishment?", [], tools)
+    assert reply.tool_calls[0][0] == "get_product_details"
+    assert "Lucy blouse" in reply.text and "Reorder" in reply.text

@@ -1,7 +1,12 @@
 # Never commit API keys
 .streamlit/secrets.toml
 
-# Raw M5 files are too large for GitHub (100 MB limit)
+# Raw dataset files are too large for GitHub (100 MB limit)
+transactions_train.csv
+articles.csv
+customers.csv
+hm_selection.zip
+hm_images/
 sales_train_*.csv
 sell_prices.csv
 calendar.csv
@@ -10,3 +15,4 @@ sample_submission.csv
 __pycache__/
 .pytest_cache/
 .venv/
+.ipynb_checkpoints/

@@ -1,31 +1,41 @@
 # AI Inventory & Replenishment Planner
 
-An agentic AI assistant that helps a warehouse manager decide **what to reorder, how much, and when**, built on Walmart sales data from the M5 Forecasting dataset.
+An agentic AI assistant that helps a store manager decide **what to reorder, how much, and when**. It uses one year of real H&M daily sales, with real product names and photos.
 
 **Live app:** https://ai-inventory-replenishment-planner-4dtk2bp4nqeuo73l8pqlan.streamlit.app/
+**Notebook:** [Open in Colab](https://colab.research.google.com/github/QuantumFluxx-pew/AI-Inventory-Replenishment-Planner/blob/main/notebooks/AI_Inventory_Replenishment_Planner_HM.ipynb)
 
 ## What it does
 
-* **Dashboard (left):** KPIs, stock vs. reorder point chart, product table, CSV download, and a step-by-step calculation for any product.
-* **Assistant (right):** answers questions in plain English, such as *"Which products should I prioritize?"* or *"What if demand increases by 20%?"*.
-* **Editable inputs:** change ordering cost, holding cost, lead time, demand change or safety stock, then recalculate. Invalid values are rejected with an explanation.
+* **Dashboard (left):** KPIs; stock vs. reorder point, days of cover and order charts; a product table with photos; and, for any product, its photo, the step-by-step calculation, and 90 days of sales plotted against the forecast.
+* **Assistant (right):** answers questions in plain English, such as *"Which products should I prioritize?"*, *"Why does Lucy blouse need replenishment?"* or *"What if demand increases by 20%?"*. When it talks about a product, it shows its photo.
+* **Editable inputs:** ordering cost, holding cost, lead time, demand change, safety stock and forecast window, with **Recalculate**. Invalid values are rejected with an explanation.
 
-## Embedded analytical models
+## Data: H&M Personalized Fashion Recommendations (Kaggle)
+
+The full dataset has 31 million purchases of 105,000 products, with real names and photos. We use **18 steady-selling products** and their **daily unit sales for one year** (2019-09-24 to 2020-09-22).
+
+How they were chosen:
+1. **On Kaggle** (`kaggle/hm_select_products.py`): count units sold per product per day for the last 365 days. Keep products sold on ≥ 90% of days, and rank them by forecastability (SMA error ÷ average demand). Save the top 40 with their photos.
+2. **Cleaning** (`prepare_data.py`): check for gaps, negatives and duplicates. Drop products **being phased out** (last 4 weeks < 50% of their yearly average). Keep at most 3 per product type. Make 300-pixel photo thumbnails.
+
+**Assumptions, clearly labelled:** H&M doesn't publish stock levels, costs or lead times. **Current stock is simulated** with a fixed random seed (3–12 days of cover). Ordering cost $50, holding cost $2/unit/year and a 7-day lead time are sample values.
+
+## Embedded analytical models (`inventory_model.py`)
 
 | Model | Formula | Purpose |
 |---|---|---|
-| Simple Moving Average | d = mean of last 7 days of sales | Daily demand forecast |
-| MAE | mean \|actual − one-day-ahead SMA\| | Forecast accuracy |
+| Simple Moving Average | d = mean of last N days (N = 7 by default) | Daily demand forecast |
+| MAE (back-test) | mean \|actual − one-day-ahead SMA\| over the year | Forecast accuracy |
 | Economic Order Quantity | EOQ = ⌈√(2DS / H)⌉, D = 365·d | How much to order |
 | Reorder Point | ROP = ⌈d·L + safety stock⌉ | When to order |
 | Safety stock (optional) | z · 1.25·MAE · √L | Buffer for forecast error |
 
 Rule: if current stock ≤ ROP, order EOQ units.
 
-**Default assumptions** (Milestone 2): S = $50/order, H = $2/unit/year, L = 7 days, no safety stock.
-These are sample values. M5 has no cost, lead-time or inventory data, and **current stock is simulated**.
+Why a 7-day window? Comparing windows across all 18 products, the median scaled error is 0.366 (3 days), **0.350 (7 days)**, 0.381 (14 days) and 0.412 (28 days).
 
-## How the AI agent works
+## How the AI agent works (`agent.py`)
 
 ```
 User question → Gemini LLM → picks a tool + inputs → Python runs the model
@@ -34,7 +44,7 @@ User question → Gemini LLM → picks a tool + inputs → Python runs the model
               Gemini explains the result (never calculates numbers itself)
 ```
 
-Tools the agent can call (`agent.py`):
+Tools the agent can call:
 
 * `get_inventory_summary`
 * `list_products`
@@ -45,7 +55,7 @@ Tools the agent can call (`agent.py`):
 * `reset_assumptions`
 * `get_assumptions`
 
-The agent is instructed to **ask for missing inputs** (for example, "increase demand by how much?") rather than guess. Each answer shows a **"Tools used"** panel listing every tool call and its result.
+The agent **asks for missing inputs** ("increase demand by how much?") instead of guessing. Unclear products are resolved by name, type or article ID; for example, "t-shirt" makes it ask which of the three tees. Each answer has a **"Tools used"** panel showing every tool call and its result.
 
 **Two modes, always labelled in the app:**
 
@@ -57,15 +67,16 @@ The agent is instructed to **ask for missing inputs** (for example, "increase de
 | File | What it does |
 |---|---|
 | `app.py` | Streamlit interface (dashboard + chat) |
-| `inventory_model.py` | All calculations: SMA, MAE, EOQ, ROP, safety stock, validation |
+| `inventory_model.py` | All calculations: SMA, MAE, EOQ, ROP, safety stock, validation, product lookup |
 | `agent.py` | Gemini tool-calling agent, tool definitions, offline fallback |
-| `prepare_data.py` | Rebuilds the CSV from raw M5 data (run locally) |
-| `inventory_replenishment_results.csv` | 20 HOBBIES products, store TX_1, with simulated stock |
-| `product_prices.csv` | Real shelf price of each product (M5 `sell_prices.csv`, latest week). Shown for context only |
+| `data/products.csv` | 18 products: name, type, colour, description, simulated stock |
+| `data/daily_sales.csv` | Real daily unit sales, 365 days × 18 products |
+| `images/` | Product photo thumbnails |
+| `kaggle/hm_select_products.py` | Step 1: runs on Kaggle to pick steady products from 31M purchases |
+| `prepare_data.py` | Step 2: cleans the Kaggle output into `data/` and `images/` |
+| `notebooks/…HM.ipynb` | Colab notebook: the full model walk-through with tests |
+| `tests/test_inventory.py` | 25 automated tests |
 | `.streamlit/config.toml` | Forces the light theme |
-
-**About product names:** Walmart anonymised M5, so there are no real product names. An ID like `HOBBIES_1_019` means *category HOBBIES, department 1, item 019*. The app shows it as **"Hobbies Item 019"**.
-| `tests/test_inventory.py` | 21 automated tests |
 
 ## Run it on your computer
 
@@ -74,29 +85,19 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
-To enable the AI agent locally, copy `.streamlit/secrets.toml.example` to `.streamlit/secrets.toml` and paste in your key.
+To enable the AI agent locally, copy `.streamlit/secrets.toml.example` to `.streamlit/secrets.toml` and add your key.
 
 ## Turn on the AI agent on Streamlit Cloud
 
 1. Get a free API key at **https://aistudio.google.com** → *Get API key*.
-2. Go to **https://share.streamlit.io**, find this app, click **⋮ → Settings → Secrets**.
+2. Go to **https://share.streamlit.io**, find this app, and click **⋮ → Settings → Secrets**.
 3. Paste the following and save:
    ```toml
    GEMINI_API_KEY = "your-key-here"
    ```
-4. The app restarts, and the badge above the chat turns green: **AI agent: Gemini**.
+4. The badge above the chat turns green: **AI agent: Gemini**.
 
-Never put the key in `app.py` or any file on GitHub. This repository is public.
-
-## Rebuild the data from M5 (optional)
-
-Download `sales_train_validation.csv` from the [Kaggle M5 competition](https://www.kaggle.com/c/m5-forecasting-accuracy), place it in this folder, then run:
-
-```bash
-python prepare_data.py
-```
-
-This reproduces `inventory_replenishment_results.csv` exactly. Put `sell_prices.csv` in the folder too, and it also writes `product_prices.csv`.
+Never put the key in a file on GitHub. This repository is public.
 
 ## Testing
 
@@ -107,37 +108,40 @@ python -m pytest -v
 
 The tests check the following:
 
-* The models reproduce the Milestone 2 results exactly (12 reorders, 1,856 units).
-* EOQ, ROP, safety stock, SMA and MAE match hand calculations.
-* Invalid inputs are rejected: negative lead time, zero cost, text instead of numbers, unsupported service levels, unknown product IDs.
-* What-if scenarios don't change the dashboard, and `update_assumptions` does.
-* The assistant asks for a missing percentage instead of guessing.
+* **Data:** 365 days with no gaps, no negative sales, a photo for every product.
+* **Formulas, checked by hand:** Brit Baby Tee sold 65 units in 7 days → forecast 9.29/day → ROP 65, EOQ 412, and stock 65 ≤ 65 → Reorder.
+* **Scenarios:**
+  * baseline: 8 products, 5,048 units
+  * demand +20%: 9 products, 5,962 units
+  * lead time 14 days: all 18 products
+* **Validation:** negative lead time, zero cost, text instead of numbers, unsupported service level or window, unknown or ambiguous product.
+* **Agent tools:** what-ifs don't change the dashboard, `update_assumptions` does, and the assistant asks for a missing percentage instead of guessing.
 
 ## Demo script (follows the assignment's six steps)
 
-Run this with the AI agent enabled. The numbers below are verified by the automated tests. Gemini's exact wording will vary.
+Run this with the AI agent enabled. The numbers come from the tests. Gemini's wording will vary.
 
 | Step | Say in the chat | Expected behaviour |
 |---|---|---|
-| 1. Objective | *Which products should I prioritize?* | Ranked list: HOBBIES_1_013 first (2.3 days of cover) |
+| 1. Objective | *Which products should I prioritize?* | Harrison short sleeve top first (3.6 days of cover) |
 | 2. Missing input | *What happens if demand increases?* | Agent asks: by what percentage? |
 | 3. Validate input | *Set lead time to -5 days* | Agent explains lead time must be > 0 |
-| 4. Run model | *What if demand increases by 20%?* | Order units 1,856 → 2,031 |
-| 5. Explain | *Why does HOBBIES_1_019 need replenishment?* | Stock 40 ≤ ROP 53, order EOQ 372, with calculation steps |
-| 6. Revise + rerun | *Change lead time to 14 days* | Dashboard updates: 14 products need reorder, 2,211 units |
+| 4. Run model | *What if demand increases by 20%?* | Order units 5,048 → 5,962 |
+| 5. Explain | *Why does Brit Baby Tee need replenishment?* | Stock 65 ≤ ROP 65, order 412, with calculation steps and photo |
+| 6. Revise + rerun | *Change lead time to 14 days* | Dashboard updates: all 18 products need reorder |
 
 Open **"Tools used"** under any answer to show that Python, not the LLM, produced the numbers.
 
 ## Limitations
 
-* Stock levels are simulated, and costs and lead time are assumptions.
-* A 7-day SMA reacts slowly to trends and seasonality, and many HOBBIES items sell less than 1 unit/day.
-* Only 20 products from one store.
-* The safety-stock σ ≈ 1.25 × MAE assumes roughly normal forecast errors.
+* Stock levels are simulated, and costs and lead time are assumptions. H&M prices in the dataset are scaled, so they aren't used.
+* The sales are online purchases, so they're a stand-in for store or warehouse demand.
+* An SMA reacts slowly to trends and seasonality; for example, Lucy blouse sales more than doubled in the final weeks.
+* Only 18 products; the safety-stock σ ≈ 1.25 × MAE assumes roughly normal errors.
 * Offline mode only understands simple phrasings.
 
 ## Future improvements
 
-* Use `sell_prices.csv` to set holding cost as a % of each item's price.
-* Compare SMA with exponential smoothing and pick the more accurate forecast per item.
-* Let users upload their own stock levels.
+* Compare SMA with exponential smoothing and choose the more accurate one per product.
+* Let users upload their own stock levels and costs.
+* Detect fading products automatically and suggest not reordering them.

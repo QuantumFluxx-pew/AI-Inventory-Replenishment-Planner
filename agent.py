@@ -39,6 +39,7 @@ import pandas as pd
 
 import inventory_model as model
 
+MODEL_VERSION = model.MODEL_VERSION   # app.py reloads modules if these differ
 DEFAULT_MODEL = "gemini-3.5-flash-lite"
 MAX_TOOL_ROUNDS = 6          # safety limit on tool calls per question
 HISTORY_TURNS = 10           # how many earlier messages the LLM sees
@@ -56,11 +57,11 @@ def _r(value, digits=2):
 
 
 def _product_row(row: pd.Series) -> dict:
-    price = row.get("Sell_Price")
     return {
         "product_id": row["Product_ID"],
-        "name": row.get("Name", row["Product_ID"]),
-        "shelf_price_usd": None if pd.isna(price) else float(price),
+        "name": row["Name"],
+        "product_type": row["Product_Type"],
+        "colour": row["Colour"],
         "current_stock": int(row["Current_Stock"]),
         "reorder_point": int(row["ROP"]),
         "eoq": int(row["EOQ"]),
@@ -90,9 +91,10 @@ class InventoryTools:
             **a.to_dict(),
             "notes": (
                 "Ordering cost, holding cost and lead time are sample assumptions, "
-                "not real Walmart figures. Current stock is simulated because the "
-                "M5 dataset has no inventory data. Demand forecast is a 7-day SMA "
-                "of store TX_1 sales (M5 days d_1907-d_1913)."
+                "not real H&M figures. Current stock is simulated because the H&M "
+                "dataset has no inventory data. Demand forecast is a "
+                f"{a.sma_window}-day simple moving average of real H&M daily sales "
+                "(one year, 2019-09-24 to 2020-09-22)."
             ),
         }
 
@@ -130,8 +132,10 @@ class InventoryTools:
         lead_time_demand = row["Daily_Demand"] * a.lead_time_days
         details = _product_row(row)
         details.update({
-            "sma_7_forecast_units_per_day": _r(float(row["SMA_7"]), 3),
-            "forecast_mae": _r(float(row["MAE"]), 3),
+            "description": row["Description"],
+            "sma_window_days": a.sma_window,
+            "sma_forecast_units_per_day": _r(float(row["SMA"]), 3),
+            "forecast_mae_units_per_day": _r(float(row["MAE"]), 3),
             "annual_demand": _r(float(row["Annual_Demand"]), 1),
             "safety_stock": float(row["Safety_Stock"]),
             "lead_time_days": a.lead_time_days,
@@ -178,14 +182,14 @@ class InventoryTools:
         }
 
     def run_what_if(self, demand_change_pct=None, lead_time_days=None, ordering_cost=None,
-                    holding_cost=None, service_level=None, product_id=None) -> dict:
+                    holding_cost=None, service_level=None, sma_window=None, product_id=None) -> dict:
         """Compare the current plan with a hypothetical one. Does NOT change
         the dashboard; use update_assumptions for that."""
         scenario = model.validate_assumptions(
             base=self.assumptions,
             demand_change_pct=demand_change_pct, lead_time_days=lead_time_days,
             ordering_cost=ordering_cost, holding_cost=holding_cost,
-            service_level=service_level,
+            service_level=service_level, sma_window=sma_window,
         )
         if scenario == self.assumptions:
             return {"error": "No change given. Ask the user which input to change and by how much."}
@@ -209,10 +213,10 @@ class InventoryTools:
             "summary_before": model.summarize(before),
             "summary_after": model.summarize(after),
             "products_that_newly_need_reorder": diff.loc[
-                diff["Status_Changed"] & (diff["Status_after"] == "Reorder"), "Product_ID"
+                diff["Status_Changed"] & (diff["Status_after"] == "Reorder"), "Name"
             ].tolist(),
             "products_no_longer_needing_reorder": diff.loc[
-                diff["Status_Changed"] & (diff["Status_after"] != "Reorder"), "Product_ID"
+                diff["Status_Changed"] & (diff["Status_after"] != "Reorder"), "Name"
             ].tolist(),
             "changed_products": [
                 {k: (v.item() if hasattr(v, "item") else v) for k, v in rec.items()}
@@ -222,13 +226,13 @@ class InventoryTools:
         }
 
     def update_assumptions(self, demand_change_pct=None, lead_time_days=None, ordering_cost=None,
-                           holding_cost=None, service_level=None) -> dict:
+                           holding_cost=None, service_level=None, sma_window=None) -> dict:
         """Permanently change the inputs used by the dashboard and the agent."""
         new = model.validate_assumptions(
             base=self.assumptions,
             demand_change_pct=demand_change_pct, lead_time_days=lead_time_days,
             ordering_cost=ordering_cost, holding_cost=holding_cost,
-            service_level=service_level,
+            service_level=service_level, sma_window=sma_window,
         )
         old = self.assumptions
         self.assumptions = new
@@ -243,7 +247,7 @@ class InventoryTools:
         self.assumptions = model.DEFAULT_ASSUMPTIONS
         return {"new_assumptions": self.assumptions.to_dict(),
                 "new_summary": model.summarize(self.plan),
-                "note": "Restored the Milestone 2 default assumptions."}
+                "note": "Restored the default assumptions."}
 
     # -- dispatcher -----------------------------------------------------
     def call(self, name: str, args: dict | None) -> dict:
@@ -279,6 +283,7 @@ _ASSUMPTION_PROPS = {
     "ordering_cost": {"type": "number", "description": "Cost per order placed, in dollars (> 0)."},
     "holding_cost": {"type": "number", "description": "Holding cost per unit per year, in dollars (> 0)."},
     "service_level": {"type": "number", "description": "Safety-stock service level %: one of 0, 90, 95, 97.5, 99. 0 = no safety stock."},
+    "sma_window": {"type": "integer", "description": "Days in the moving-average forecast: one of 3, 7, 14, 28."},
 }
 
 TOOL_SPECS = [
@@ -295,7 +300,7 @@ TOOL_SPECS = [
     {"name": "get_product_details",
      "description": "Full detail for one product, including step-by-step EOQ/ROP calculations and why it does or does not need reordering.",
      "parameters": {"type": "object", "properties": {
-         "product_id": {"type": "string", "description": "e.g. HOBBIES_1_016"}},
+         "product_id": {"type": "string", "description": "Product name (or a unique part of it) or H&M article ID, e.g. 'Brit Baby Tee' or '0624486001'"}},
          "required": ["product_id"]}},
     {"name": "prioritize_reorders",
      "description": "Rank products needing reorder by urgency (fewest days of stock left first).",
@@ -310,20 +315,19 @@ TOOL_SPECS = [
      "description": "Permanently change the assumptions used by the dashboard, only when the user asks to set/change/use new values going forward.",
      "parameters": {"type": "object", "properties": _ASSUMPTION_PROPS}},
     {"name": "reset_assumptions",
-     "description": "Restore the default assumptions (S=$50, H=$2, 7-day lead time, no safety stock, no demand change).",
+     "description": "Restore the default assumptions (S=$50, H=$2, 7-day lead time, no safety stock, no demand change, 7-day forecast window).",
      "parameters": {"type": "object", "properties": {}}},
 ]
 
 
 SYSTEM_PROMPT = """You are the Inventory Replenishment Assistant for a warehouse manager.
-You work with 20 HOBBIES products from Walmart store TX_1 (M5 dataset).
-Walmart anonymised the data, so products have no real names: each has an ID like
-HOBBIES_1_019 and a display name like "Hobbies Item 019" (category + item number).
-Never invent what a product actually is. Shelf prices are real M5 data but are shown
-for context only; they do not affect EOQ or ROP.
+You work with 18 steady-selling H&M clothing products (real product names, e.g.
+"Brit Baby Tee", "Pluto RW slacks (1)"), using one year of real H&M daily sales
+(2019-09-24 to 2020-09-22, H&M Personalized Fashion Recommendations dataset).
+Users may refer to products by name or part of a name; pass their words to the tools.
 
 Your models (run by Python tools, never by you):
-- 7-day Simple Moving Average demand forecast (accuracy measured by MAE)
+- Simple Moving Average demand forecast, 7-day window by default (accuracy measured by MAE)
 - Economic Order Quantity: EOQ = sqrt(2DS/H)
 - Reorder Point: ROP = daily demand x lead time (+ optional safety stock)
 - Rule: reorder EOQ units when current stock <= ROP
@@ -334,7 +338,7 @@ STRICT RULES
 2. If the user's request is missing a required input, ASK for it instead of guessing.
    Examples: "what if demand increases?" -> ask by what percent.
    "how would a longer lead time affect it?" -> ask how many days.
-   An unclear product -> ask which product ID.
+   An unclear product -> ask which product.
 3. If a tool returns an "error", explain the problem in plain words and ask the user
    for a corrected value. Do not retry with a value you made up.
 4. Use run_what_if for "what if" questions (dashboard unchanged). Use update_assumptions
@@ -436,7 +440,7 @@ class GeminiAgent:
 # 4. OFFLINE MODE (rule-based, NO language model)
 # ======================================================================
 
-_PID = re.compile(r"hobbies[\s_-]*(?:1|item)[\s_-]*(\d{1,3})", re.I)
+_ARTICLE_ID = re.compile(r"\b0?\d{9}\b")
 _PCT = re.compile(r"(-?\d+(?:\.\d+)?)\s*(%|percent)", re.I)
 _DAYS = re.compile(r"(\d+(?:\.\d+)?)\s*-?\s*days?", re.I)
 
@@ -444,7 +448,7 @@ _DAYS = re.compile(r"(\d+(?:\.\d+)?)\s*-?\s*days?", re.I)
 def _fmt_products(rows, show_order=True):
     lines = []
     for r in rows:
-        line = (f"- **{r['name']}** ({r['product_id']}): "
+        line = (f"- **{r['name']}** ({r['product_type']}): "
                 f"stock {r['current_stock']}, ROP {r['reorder_point']}")
         if show_order and r["recommended_order_units"]:
             line += f", order **{r['recommended_order_units']}** units"
@@ -468,7 +472,7 @@ class OfflineAssistant:
         def reply(text):
             return AgentReply(text=text, mode="offline", tool_calls=log)
 
-        pid_match = _PID.search(q)
+        product = self._mentioned_product(q, tools)
         pct = _PCT.search(q)
         days = _DAYS.search(q)
         what_if = any(w in q for w in ["what if", "what happens", "increase", "decrease",
@@ -492,16 +496,16 @@ class OfflineAssistant:
             res = call("run_what_if", lead_time_days=float(days.group(1)))
             return reply(self._what_if_text(res, f"lead time of {days.group(1)} days"))
 
-        if pid_match:
-            res = call("get_product_details", product_id=f"HOBBIES_1_{pid_match.group(1)}")
+        if product:
+            res = call("get_product_details", product_id=product)
             if "error" in res:
                 return reply(res["error"])
             steps = res["calculation_steps"]
-            price = (f", shelf price ${res['shelf_price_usd']:.2f}"
-                     if res.get("shelf_price_usd") is not None else "")
             return reply(
-                f"**{res['name']}** ({res['product_id']}{price}): **{res['status']}**\n\n"
-                f"- Forecast demand: {res['daily_demand_forecast']} units/day (7-day SMA)\n"
+                f"**{res['name']}** ({res['product_type']}, {res['colour']}): "
+                f"**{res['status']}**\n\n"
+                f"- Forecast demand: {res['daily_demand_forecast']} units/day "
+                f"({res['sma_window_days']}-day SMA)\n"
                 f"- Current stock: {res['current_stock']} units, about "
                 f"{res['days_of_cover']} days of cover vs a {res['lead_time_days']:g}-day lead time\n"
                 f"- Reorder point: {steps['reorder_point']}\n"
@@ -513,7 +517,7 @@ class OfflineAssistant:
         if any(w in q for w in ["priorit", "urgent", "first", "most critical"]):
             res = call("prioritize_reorders", limit=5)
             lines = "\n".join(
-                f"{r['rank']}. **{r['name']}** ({r['product_id']}): {r['days_of_cover']} days of cover, "
+                f"{r['rank']}. **{r['name']}**: {r['days_of_cover']} days of cover, "
                 f"{r['units_below_reorder_point']} units below ROP, order {r['recommended_order_units']}"
                 for r in res["ranked"]
             )
@@ -550,8 +554,26 @@ class OfflineAssistant:
         return reply(
             "Offline mode only understands simple questions. Try:\n\n"
             "- Which products need to be reordered?\n- Which products should I prioritize?\n"
-            "- Why does HOBBIES_1_019 need replenishment?\n- What if demand increases by 20%?\n"
+            "- Why does Lucy blouse need replenishment?\n- What if demand increases by 20%?\n"
             "- What if lead time is 14 days?\n- What products are in stock?")
+
+    @staticmethod
+    def _mentioned_product(q: str, tools: InventoryTools) -> str | None:
+        """Find a product named in the question: an article ID, the full
+        product name, or its first word plus at least one more word of it."""
+        id_match = _ARTICLE_ID.search(q)
+        if id_match:
+            return id_match.group(0)
+        words_in_q = set(re.findall(r"[a-z0-9]+", q))
+        best = []
+        for name in tools.base["Name"]:
+            lname = name.lower()
+            if lname in q:
+                return name
+            words = re.findall(r"[a-z0-9]+", lname)
+            if words and words[0] in words_in_q and len(set(words) & words_in_q) >= 2:
+                best.append(name)
+        return best[0] if len(best) == 1 else None
 
     @staticmethod
     def _what_if_text(res: dict, label: str) -> str:

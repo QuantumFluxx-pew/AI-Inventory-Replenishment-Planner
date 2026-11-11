@@ -8,12 +8,17 @@ Every number shown in the dashboard or said by the chatbot is calculated
 HERE, in plain Python. The language model never does arithmetic; it only
 decides which of these functions to call and explains the results.
 
-Models (same formulas as the Milestone 2 Colab notebook):
+Data: 20 steady-selling H&M products, one year of daily unit sales
+(2019-09-24 to 2020-09-22), from the H&M Personalized Fashion
+Recommendations dataset on Kaggle. See prepare_data.py.
+
+Models:
 
 1. Simple Moving Average (SMA) forecast
-       d = average of the last 7 days of sales          (units/day)
+       d = average of the last N days of sales        (units/day, N = 7 by default)
 2. Forecast accuracy (MAE)
-       one-day-ahead rolling 7-day SMA vs. actual sales
+       back-test over the whole year: for each day, forecast it with the
+       average of the N days before it, then average the absolute errors
 3. Economic Order Quantity (EOQ)
        EOQ = ceil( sqrt( 2 * D * S / H ) )
        D = annual demand = d * 365, S = cost per order, H = holding cost/unit/year
@@ -25,10 +30,6 @@ Models (same formulas as the Milestone 2 Colab notebook):
 5. Replenishment rule
        Current_Stock <= ROP  ->  "Reorder", order EOQ units
        otherwise             ->  "Sufficient Stock", order 0
-
-With the default assumptions (S = $50, H = $2, L = 7 days, no safety stock,
-no demand change) this module reproduces inventory_replenishment_results.csv
-exactly. tests/test_inventory_model.py checks that.
 """
 
 from __future__ import annotations
@@ -41,14 +42,22 @@ from statistics import NormalDist
 import numpy as np
 import pandas as pd
 
+MODEL_VERSION = "hm-2026-11-10"   # must match agent.MODEL_VERSION (see app.py)
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+PRODUCTS_CSV = os.path.join(HERE, "data", "products.csv")
+SALES_CSV = os.path.join(HERE, "data", "daily_sales.csv")
+IMAGES_DIR = os.path.join(HERE, "images")
+
 
 # ----------------------------------------------------------------------
-# 1. ASSUMPTIONS (the inputs the M5 dataset does not provide)
+# 1. ASSUMPTIONS (inputs the dataset does not provide, plus model settings)
 # ----------------------------------------------------------------------
 
-# Service levels the user may pick for safety stock.
-# 0 means "no safety stock", which matches the Milestone 2 model.
+# Safety-stock service levels the user may pick; 0 = no safety stock.
 ALLOWED_SERVICE_LEVELS = (0, 90, 95, 97.5, 99)
+# Moving-average windows the user may pick (days).
+ALLOWED_SMA_WINDOWS = (3, 7, 14, 28)
 
 
 class InputError(ValueError):
@@ -61,13 +70,14 @@ class InputError(ValueError):
 
 @dataclass(frozen=True)
 class Assumptions:
-    """All model inputs that are assumptions rather than M5 data."""
+    """All model inputs that are assumptions or user settings."""
 
     ordering_cost: float = 50.0       # S: dollars per order placed
     holding_cost: float = 2.0         # H: dollars per unit per year
     lead_time_days: float = 7.0       # L: supplier lead time in days
     demand_change_pct: float = 0.0    # scenario: +20 means demand is 20% higher
     service_level: float = 0.0        # safety stock service level (%), 0 = none
+    sma_window: int = 7               # days in the moving-average forecast
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -79,11 +89,11 @@ DEFAULT_ASSUMPTIONS = Assumptions()
 def validate_assumptions(**values) -> Assumptions:
     """Check user inputs and return a clean Assumptions object.
 
-    Any input not supplied keeps its default value. All problems are
+    Any input not supplied keeps its current value. All problems are
     collected and reported together so the user can fix them in one go.
 
     Raises:
-        InputError: if any value is missing a number, negative, or out of range.
+        InputError: if any value is not a number, negative, or out of range.
     """
     base = values.pop("base", DEFAULT_ASSUMPTIONS)
     problems = []
@@ -96,25 +106,31 @@ def validate_assumptions(**values) -> Assumptions:
         "lead_time_days": (0, 365, False, "Lead time (days)"),
         "demand_change_pct": (-100, 1_000, True, "Demand change (%)"),
     }
+    choices = {
+        "service_level": (ALLOWED_SERVICE_LEVELS, "Service level", "%",
+                          " Use 0 for no safety stock."),
+        "sma_window": (ALLOWED_SMA_WINDOWS, "Moving-average window", " days", ""),
+    }
 
     for name, value in values.items():
         if value is None:
             continue  # not supplied -> keep the current value
 
-        if name == "service_level":
+        if name in choices:
+            allowed, label, unit, hint = choices[name]
             try:
-                level = float(value)
+                number = float(value)
             except (TypeError, ValueError):
-                problems.append(f"Service level must be a number, got '{value}'.")
+                problems.append(f"{label} must be a number, got '{value}'.")
                 continue
-            if level not in ALLOWED_SERVICE_LEVELS:
+            if number not in allowed:
                 problems.append(
-                    "Service level must be one of "
-                    + ", ".join(f"{v:g}%" for v in ALLOWED_SERVICE_LEVELS)
-                    + f" (got {level:g}). Use 0 for no safety stock."
+                    f"{label} must be one of "
+                    + ", ".join(f"{v:g}{unit}" for v in allowed)
+                    + f" (got {number:g}).{hint}"
                 )
                 continue
-            clean[name] = level
+            clean[name] = int(number) if name == "sma_window" else number
             continue
 
         if name not in rules:
@@ -150,7 +166,7 @@ def validate_assumptions(**values) -> Assumptions:
 
 
 # ----------------------------------------------------------------------
-# 2. FORECASTING MODELS (used by prepare_data.py on the raw M5 files)
+# 2. FORECASTING MODELS
 # ----------------------------------------------------------------------
 
 def sma_forecast(daily_sales, window: int = 7) -> float:
@@ -161,14 +177,19 @@ def sma_forecast(daily_sales, window: int = 7) -> float:
     return float(sales.iloc[-window:].mean())
 
 
-def sma_mae(daily_sales, window: int = 7) -> float:
-    """Mean Absolute Error of a one-day-ahead rolling SMA forecast.
+def sma_backtest(daily_sales, window: int = 7) -> pd.Series:
+    """One-day-ahead SMA forecast for every day (NaN for the first `window` days).
 
-    For each day t, the forecast is the mean of days t-window .. t-1.
-    This is the same back-test used in the Milestone 2 notebook.
+    The forecast for day t is the mean of days t-window .. t-1.
     """
+    sales = pd.Series(daily_sales, dtype=float)
+    return sales.shift(1).rolling(window).mean()
+
+
+def sma_mae(daily_sales, window: int = 7) -> float:
+    """Mean Absolute Error of the one-day-ahead SMA forecast."""
     sales = pd.Series(daily_sales, dtype=float).reset_index(drop=True)
-    predictions = sales.shift(1).rolling(window).mean()
+    predictions = sma_backtest(sales, window)
     return float((sales - predictions).abs().mean())  # NaNs are skipped
 
 
@@ -179,8 +200,8 @@ def sma_mae(daily_sales, window: int = 7) -> float:
 def _ceil(value):
     """Round up to whole units, ignoring tiny floating-point noise.
 
-    Example: 0.5714285714 * 7 is stored as 4.0000000001, which a plain
-    ceil would turn into 5. Rounding to 9 decimals first prevents that.
+    Example: 4/7 * 7 is stored as 4.0000000001, which a plain ceil would
+    turn into 5. Rounding to 9 decimals first prevents that.
     """
     return np.ceil(np.round(value, 9))
 
@@ -212,90 +233,83 @@ def reorder_point(daily_demand, lead_time_days, safety_units=0):
 
 
 # ----------------------------------------------------------------------
-# 4. FULL REPLENISHMENT PLAN
+# 4. DATA LOADING
 # ----------------------------------------------------------------------
 
-BASE_COLUMNS = ["Product_ID", "SMA_7", "MAE", "Current_Stock"]
+PRODUCT_COLUMNS = ["Product_ID", "Name", "Product_Type", "Colour",
+                   "Department", "Description", "Current_Stock"]
 
 
-def load_base_data(path: str = "inventory_replenishment_results.csv") -> pd.DataFrame:
-    """Load the per-product inputs: forecast, accuracy and (simulated) stock.
-
-    Only Product_ID, SMA_7, MAE and Current_Stock are used as inputs.
-    EOQ, ROP, Status and Order_Quantity are recalculated live by
-    calculate_plan(), so they always match the current assumptions.
-    """
-    data = pd.read_csv(path)
-    data.columns = data.columns.str.strip()
-
-    missing = [col for col in BASE_COLUMNS if col not in data.columns]
+def load_sales(path: str = SALES_CSV) -> pd.DataFrame:
+    """Daily unit sales as a wide table: one row per day, one column per product."""
+    sales = pd.read_csv(path, dtype={"article_id": str}, parse_dates=["date"])
+    missing = {"date", "article_id", "units"} - set(sales.columns)
     if missing:
-        raise InputError("The inventory CSV is missing columns: " + ", ".join(missing))
-
-    base = data[BASE_COLUMNS].copy()
-    base["Product_ID"] = base["Product_ID"].astype(str).str.strip()
-
-    for col in ["SMA_7", "MAE", "Current_Stock"]:
-        base[col] = pd.to_numeric(base[col], errors="coerce")
-
-    bad = base[base[["SMA_7", "MAE", "Current_Stock"]].isna().any(axis=1)]
-    if not bad.empty:
-        raise InputError(
-            "Non-numeric or empty values for: " + ", ".join(bad["Product_ID"])
-        )
-    if (base[["SMA_7", "MAE", "Current_Stock"]] < 0).any().any():
-        raise InputError("SMA_7, MAE and Current_Stock cannot be negative.")
-    if base["Product_ID"].duplicated().any():
-        raise InputError("Each Product_ID must appear only once in the CSV.")
-
-    # Friendly display name (M5 has no real product names).
-    base["Name"] = base["Product_ID"].map(product_label)
-
-    # Real shelf price from M5 sell_prices.csv, if prepare_data.py saved it.
-    # Display only: prices do not change EOQ or ROP.
-    prices_path = os.path.join(os.path.dirname(os.path.abspath(path)), "product_prices.csv")
-    if os.path.exists(prices_path):
-        prices = pd.read_csv(prices_path)[["Product_ID", "Sell_Price"]]
-        base = base.merge(prices, on="Product_ID", how="left")
-    else:
-        base["Sell_Price"] = np.nan
-
-    return base
+        raise InputError("daily_sales.csv is missing columns: " + ", ".join(sorted(missing)))
+    sales["units"] = pd.to_numeric(sales["units"], errors="coerce")
+    if sales["units"].isna().any() or (sales["units"] < 0).any():
+        raise InputError("daily_sales.csv has missing or negative unit values.")
+    wide = sales.pivot_table(index="date", columns="article_id", values="units", aggfunc="sum")
+    return wide.asfreq("D").fillna(0)
 
 
-def product_label(product_id: str) -> str:
-    """'HOBBIES_1_019' -> 'Hobbies Item 019'.
+def load_base_data(products_path: str = PRODUCTS_CSV,
+                   sales_path: str = SALES_CSV) -> pd.DataFrame:
+    """Product details + simulated stock + forecasts for every allowed window.
 
-    M5 anonymises products, so there are no real names. The label just
-    makes the ID easier to read: category + item number.
+    For each product and each window N in ALLOWED_SMA_WINDOWS this adds
+    SMA_<N> (forecast) and MAE_<N> (back-tested accuracy), so changing the
+    window in the app is instant.
     """
-    parts = str(product_id).split("_")
-    if len(parts) == 3:
-        return f"{parts[0].title()} Item {parts[2]}"
-    return str(product_id)
+    products = pd.read_csv(products_path, dtype={"Product_ID": str})
+    missing = [c for c in PRODUCT_COLUMNS if c not in products.columns]
+    if missing:
+        raise InputError("products.csv is missing columns: " + ", ".join(missing))
+    products = products[PRODUCT_COLUMNS].copy()
+    products["Description"] = products["Description"].fillna("")
+    products["Current_Stock"] = pd.to_numeric(products["Current_Stock"], errors="coerce")
+    if products["Current_Stock"].isna().any() or (products["Current_Stock"] < 0).any():
+        raise InputError("Current_Stock must be a non-negative number for every product.")
+    if products["Product_ID"].duplicated().any():
+        raise InputError("Each Product_ID must appear only once in products.csv.")
 
+    sales = load_sales(sales_path)
+    no_sales = [p for p in products["Product_ID"] if p not in sales.columns]
+    if no_sales:
+        raise InputError("No sales history for: " + ", ".join(no_sales))
+
+    for window in ALLOWED_SMA_WINDOWS:
+        products[f"SMA_{window}"] = [sma_forecast(sales[p], window) for p in products["Product_ID"]]
+        products[f"MAE_{window}"] = [sma_mae(sales[p], window) for p in products["Product_ID"]]
+    return products
+
+
+# ----------------------------------------------------------------------
+# 5. FULL REPLENISHMENT PLAN
+# ----------------------------------------------------------------------
 
 def calculate_plan(base: pd.DataFrame, assumptions: Assumptions = DEFAULT_ASSUMPTIONS) -> pd.DataFrame:
     """Run SMA -> EOQ -> ROP -> reorder decision for every product.
 
-    Returns one row per product with all inputs, results and helper columns
+    Returns one row per product with inputs, results and helper columns
     (Days_of_Cover, Shortfall) that explain each decision.
     """
     a = assumptions
     plan = base.copy()
 
-    # Demand forecast, adjusted for any what-if demand change.
-    plan["Daily_Demand"] = plan["SMA_7"] * (1 + a.demand_change_pct / 100)
+    # Forecast for the chosen window, adjusted for any what-if demand change.
+    plan["SMA"] = plan[f"SMA_{a.sma_window}"]
+    plan["MAE"] = plan[f"MAE_{a.sma_window}"]
+    plan["Daily_Demand"] = plan["SMA"] * (1 + a.demand_change_pct / 100)
     plan["Annual_Demand"] = plan["Daily_Demand"] * 365
 
     # Inventory models.
     plan["EOQ"] = economic_order_quantity(plan["Annual_Demand"], a.ordering_cost, a.holding_cost)
     plan["Safety_Stock"] = np.round(
-        safety_stock(plan["MAE"], a.lead_time_days, a.service_level), 2
-    )
+        safety_stock(plan["MAE"], a.lead_time_days, a.service_level), 2)
     plan["ROP"] = reorder_point(plan["Daily_Demand"], a.lead_time_days, plan["Safety_Stock"])
 
-    # Replenishment decision (same rule as the notebook: stock <= ROP).
+    # Replenishment decision: reorder when stock <= ROP.
     needs_order = (plan["Current_Stock"] <= plan["ROP"]) & (plan["Daily_Demand"] > 0)
     plan["Status"] = np.where(needs_order, "Reorder", "Sufficient Stock")
     plan["Order_Quantity"] = np.where(needs_order, plan["EOQ"], 0).astype(int)
@@ -310,8 +324,7 @@ def calculate_plan(base: pd.DataFrame, assumptions: Assumptions = DEFAULT_ASSUMP
     with np.errstate(divide="ignore", invalid="ignore"):
         orders_per_year = np.where(plan["EOQ"] > 0, plan["Annual_Demand"] / plan["EOQ"], 0)
     plan["Annual_Cost"] = np.round(
-        orders_per_year * a.ordering_cost + plan["EOQ"] / 2 * a.holding_cost, 2
-    )
+        orders_per_year * a.ordering_cost + plan["EOQ"] / 2 * a.holding_cost, 2)
 
     return plan
 
@@ -345,47 +358,66 @@ def prioritize(plan: pd.DataFrame) -> pd.DataFrame:
 def compare_plans(before: pd.DataFrame, after: pd.DataFrame) -> pd.DataFrame:
     """Side-by-side changes in ROP, EOQ, status and order quantity."""
     cols = ["ROP", "EOQ", "Status", "Order_Quantity"]
-    merged = before[["Product_ID", "Current_Stock"] + cols].merge(
-        after[["Product_ID"] + cols], on="Product_ID", suffixes=("_before", "_after")
-    )
+    merged = before[["Product_ID", "Name", "Current_Stock"] + cols].merge(
+        after[["Product_ID"] + cols], on="Product_ID", suffixes=("_before", "_after"))
     merged["Status_Changed"] = merged["Status_before"] != merged["Status_after"]
     return merged
 
 
 # ----------------------------------------------------------------------
-# 5. PRODUCT ID LOOKUP (accepts loose user typing)
+# 6. PRODUCT LOOKUP (accepts loose user typing)
 # ----------------------------------------------------------------------
 
 def find_product(plan: pd.DataFrame, text: str) -> str:
-    """Turn user text like 'hobbies 1 16' or 'HOBBIES-1-016' into a Product_ID.
+    """Turn user text into a Product_ID.
+
+    Accepts an H&M article ID (with or without the leading zero), the
+    product name, or a unique part of it ('scallop socks', 'brit tee').
 
     Raises:
         InputError: if nothing or more than one product matches.
     """
     if not text or not str(text).strip():
-        raise InputError("Please tell me which product, for example HOBBIES_1_001.")
-
+        raise InputError("Please tell me which product, for example 'Scallop 5p Socks'.")
+    query = str(text).strip()
     ids = list(plan["Product_ID"])
-    query = str(text).strip().upper().replace("-", "_").replace(" ", "_")
-    # Also accept the friendly name, e.g. 'Hobbies Item 019'.
-    query = query.replace("_ITEM_", "_1_")
 
-    if query in ids:
-        return query
+    # 1) Article ID, e.g. '0608776002' or '608776002'.
+    digits = query.lstrip("0")
+    if digits.isdigit():
+        hits = [pid for pid in ids if pid.lstrip("0") == digits]
+        if len(hits) == 1:
+            return hits[0]
 
-    # Allow 'HOBBIES_1_16' -> 'HOBBIES_1_016' and bare numbers like '16'.
-    parts = query.split("_")
-    if parts[-1].isdigit():
-        number = int(parts[-1])
-        candidates = [
-            pid for pid in ids
-            if int(pid.split("_")[-1]) == number
-            and (len(parts) == 1 or pid.startswith("_".join(parts[:-1]) + "_"))
-        ]
-        if len(candidates) == 1:
-            return candidates[0]
+    # 2) Exact name, then names containing every word the user typed.
+    names = dict(zip(plan["Product_ID"], plan["Name"]))
+    lower = query.lower()
+    exact = [pid for pid, name in names.items() if name.lower() == lower]
+    if len(exact) == 1:
+        return exact[0]
+    words = [w for w in lower.replace("-", " ").split() if w not in {"the", "a", "of"}]
+    hits = [pid for pid, name in names.items()
+            if words and all(w in name.lower() for w in words)]
+    if len(hits) == 1:
+        return hits[0]
+    if not hits:
+        # 3) Product type, e.g. 'socks', 'cardigan', 't-shirt'.
+        types = dict(zip(plan["Product_ID"], plan["Product_Type"].str.lower()))
+        wanted = lower.rstrip("s")
+        hits = [pid for pid, kind in types.items()
+                if wanted in {kind.rstrip("s"), *[k.strip().rstrip("s") for k in kind.split("/")]}]
+        if len(hits) == 1:
+            return hits[0]
+    if len(hits) > 1:
+        options = ", ".join(names[p] for p in hits[:5])
+        raise InputError(f"'{text}' matches several products ({options}). Which one?")
 
     raise InputError(
-        f"I can't find a product called '{text}'. Valid IDs run from "
-        f"{ids[0]} to {ids[-1]} (for example {ids[0]})."
+        f"I can't find a product called '{text}'. Try a name such as "
+        f"'{names[ids[0]]}' or an article ID such as {ids[0]}."
     )
+
+
+def image_path(product_id: str) -> str:
+    """Local path of the product's photo thumbnail."""
+    return os.path.join(IMAGES_DIR, f"{product_id}.jpg")
