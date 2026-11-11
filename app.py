@@ -2,7 +2,7 @@
 app.py: AI Inventory & Replenishment Planner (Streamlit)
 
 Left panel : inventory dashboard (KPIs, charts, table, product drill-down)
-Right panel: Inventory Assistant chat
+Right panel: Restock Advisor (AI chat)
 
 Files this app uses:
     inventory_model.py   - SMA / MAE / EOQ / ROP calculations (the embedded models)
@@ -80,6 +80,30 @@ st.markdown("""
                     font-weight: 800; letter-spacing: 0.03em; }
     h2.assist-title { font-family: 'Space Grotesk', 'Helvetica Neue', Arial, sans-serif !important;
                       font-weight: 700; letter-spacing: 0.01em; }
+
+    /* Restock Advisor chat panel */
+    .advisor-sub { color: #555; margin: -0.5rem 0 0.6rem 0; font-size: 0.95rem; }
+    .st-key-advisor_chat { background: #faf9f6; border: 1px solid #111 !important;
+                           border-radius: 0 !important; }
+    [data-testid="stChatMessage"] { background: transparent; border: none; padding: 6px 2px;
+                                    gap: 10px; border-radius: 0; }
+    [data-testid="stChatMessageContent"] { background: #fff; border: 1px solid #e5e5e5;
+                                           padding: 10px 14px; }
+    [data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarUser"]) {
+        flex-direction: row-reverse; }
+    [data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarUser"])
+        [data-testid="stChatMessageContent"] { background: #111; border-color: #111;
+                                               flex: 0 1 auto; max-width: 85%; }
+    [data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarUser"])
+        [data-testid="stChatMessageContent"] p { color: #fff; }
+    [data-testid="stChatMessageAvatarAssistant"] { background: #111 !important; color: #fff !important;
+                                                   border-radius: 0 !important; }
+    [data-testid="stChatMessageAvatarUser"] { background: #d0021b !important; color: #fff !important;
+                                              border-radius: 0 !important; }
+    .try-label { font-size: 0.72rem; letter-spacing: 0.14em; text-transform: uppercase;
+                 color: #555; margin: 0.6rem 0 0.2rem 0; }
+    .stFormSubmitButton button[kind="primaryFormSubmit"] { background: #111; color: #fff; border-color: #111; }
+    .stFormSubmitButton button[kind="primaryFormSubmit"]:hover { background: #d0021b; border-color: #d0021b; }
 
     /* Header band */
     .hero { background: #111; color: #fff; padding: 22px 28px; margin-bottom: 18px;
@@ -168,7 +192,7 @@ if not isinstance(st.session_state.get("assumptions"), model.Assumptions):
     st.session_state.assumptions = model.DEFAULT_ASSUMPTIONS
 
 GREETING = (
-    "Hello! I'm your inventory replenishment assistant for 18 H&M products, "
+    "Hello! I'm your Restock Advisor for 18 H&M products, "
     "from basics like the *Brit Baby Tee* to the *Pluto RW slacks*. I can tell "
     "you which products to reorder, how many units to order, why, and what "
     "happens if demand, lead time, costs or the forecast window change.\n\n"
@@ -554,12 +578,16 @@ with dashboard_col:
     )
 
 # ==========================================================
-# 6. RIGHT PANEL: INVENTORY ASSISTANT
+# 6. RIGHT PANEL: RESTOCK ADVISOR (the AI chat)
 # ==========================================================
 
 with chat_col:
 
-    st.markdown('<h2 class="panel-title assist-title">Inventory Assistant</h2>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="advisor-head">'
+        '<h2 class="panel-title assist-title">Restock Advisor</h2>'
+        '<p class="advisor-sub">Ask what to reorder, how much and why.</p></div>',
+        unsafe_allow_html=True)
 
     if AI_ENABLED:
         st.markdown(
@@ -574,17 +602,14 @@ with chat_col:
         st.caption("No GEMINI_API_KEY is configured, so answers come from simple "
                    "keyword rules. Add a key in Streamlit secrets to enable the AI agent.")
 
-    if st.button("Clear conversation"):
-        st.session_state.messages = [{"role": "assistant", "content": GREETING}]
-        st.rerun()
-
     # Conversation, with the tools behind each answer shown for transparency.
-    chat_box = st.container(height=560, border=True)
+    # The key gives the box a CSS class (st-key-advisor_chat) for its styling.
+    chat_box = st.container(height=560, border=True, key="advisor_chat", autoscroll=True)
     with chat_box:
         for msg in st.session_state.messages:
             with st.chat_message(msg["role"]):
                 st.markdown(msg["content"])
-                # Show the photo of any product the assistant looked up.
+                # Show the photo of any product the advisor looked up.
                 shown = {res.get("product_id") for name, _, res in msg.get("tool_calls", [])
                          if name == "get_product_details" and isinstance(res, dict)}
                 for pid in sorted(p for p in shown if p):
@@ -603,15 +628,21 @@ with chat_col:
                    "What if demand increases by 20%?",
                    "Why does Lucy blouse need replenishment?"]
     picked = None
-    st.caption("Try asking:")
+    st.markdown('<p class="try-label">Try asking</p>', unsafe_allow_html=True)
     for text in suggestions:   # stacked so the full question is always readable
         if st.button(text, width="stretch", key=f"suggest_{text}"):
             picked = text
 
     # A form keeps the input inside the right column.
-    with st.form("chat_form", clear_on_submit=True):
-        typed = st.text_input("Your question", placeholder="Ask about your inventory...")
-        sent = st.form_submit_button("Send message", width="stretch")
+    with st.form("chat_form", clear_on_submit=True, border=False):
+        in_col, send_col = st.columns([4, 1], vertical_alignment="bottom")
+        typed = in_col.text_input("Your question", placeholder="Ask the Restock Advisor...",
+                                  label_visibility="collapsed")
+        sent = send_col.form_submit_button("Send", width="stretch", type="primary")
+
+    if st.button("Clear conversation", key="clear_chat", type="tertiary"):
+        st.session_state.messages = [{"role": "assistant", "content": GREETING}]
+        st.rerun()
 
     question = picked or (typed.strip() if sent else "")
 

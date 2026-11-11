@@ -8,7 +8,7 @@ An agentic AI assistant that helps a store manager decide **what to reorder, how
 ## What it does
 
 * **Dashboard (left):** KPIs; stock vs. reorder point, days of cover and order charts; a product table with photos; and, for any product, its photo, the step-by-step calculation, and 90 days of sales plotted against the forecast.
-* **Assistant (right):** answers questions in plain English, such as *"Which products should I prioritize?"*, *"Why does Lucy blouse need replenishment?"* or *"What if demand increases by 20%?"*. When it talks about a product, it shows its photo.
+* **Restock Advisor (right):** the AI chat; answers questions in plain English, such as *"Which products should I prioritize?"*, *"Why does Lucy blouse need replenishment?"* or *"What if demand increases by 20%?"*. When it talks about a product, it shows its photo.
 * **Editable inputs:** ordering cost, holding cost, lead time, demand change, safety stock and forecast window, with **Recalculate**. Invalid values are rejected with an explanation.
 
 ## Data: H&M Personalized Fashion Recommendations (Kaggle)
