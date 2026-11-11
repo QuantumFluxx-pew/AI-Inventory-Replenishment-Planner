@@ -320,7 +320,7 @@ TOOL_SPECS = [
 ]
 
 
-SYSTEM_PROMPT = """You are the Restock Advisor, an inventory replenishment assistant for a store manager.
+SYSTEM_PROMPT = """You are the AI Inventory Agent, an inventory replenishment assistant for a store manager.
 You work with 18 steady-selling H&M clothing products (real product names, e.g.
 "Brit Baby Tee", "Pluto RW slacks (1)"), using one year of real H&M daily sales
 (2019-09-24 to 2020-09-22, H&M Personalized Fashion Recommendations dataset).
