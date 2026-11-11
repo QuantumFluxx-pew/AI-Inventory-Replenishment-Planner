@@ -175,7 +175,7 @@ def _style(chart, height):
             .configure_view(strokeWidth=0)
             .configure_axis(gridColor=GRID, domainColor="#c3c2b7",
                             labelColor="#202b43", titleColor="#52514e",
-                            labelFontSize=12, titleFontSize=12)
+                            labelFontSize=12, titleFontSize=12, labelLimit=260)
             .configure_legend(orient="top", title=None, labelFontSize=12))
 
 
@@ -466,11 +466,16 @@ with dashboard_col:
         if detail["description"]:
             st.caption(detail["description"])
         st.caption(f"H&M article ID {detail['product_id']}")
-        d1, d2, d3, d4 = st.columns(4)
-        d1.metric("Forecast (units/day)", f"{detail['daily_demand_forecast']:.2f}")
-        d2.metric("Reorder Point", detail["reorder_point"])
-        d3.metric("EOQ", detail["eoq"])
-        d4.metric("Order Now", detail["recommended_order_units"])
+        status_icon = "🔴" if detail["status"] == "Reorder" else "🟢"
+        st.markdown(f"{status_icon} **{detail['status']}** · stock {detail['current_stock']} units · "
+                    f"{detail['days_of_cover']} days of cover")
+
+    # Full-width row so the numbers are never cut off.
+    d1, d2, d3, d4 = st.columns(4)
+    d1.metric("Forecast (units/day)", f"{detail['daily_demand_forecast']:.2f}")
+    d2.metric("Reorder Point", detail["reorder_point"])
+    d3.metric("EOQ", detail["eoq"])
+    d4.metric("Order Now", detail["recommended_order_units"])
 
     steps = detail["calculation_steps"]
     st.markdown(
