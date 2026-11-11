@@ -88,7 +88,13 @@ st.markdown("""
     [data-testid="stChatMessage"] { background: transparent; border: none; padding: 6px 2px;
                                     gap: 10px; border-radius: 0; }
     [data-testid="stChatMessageContent"] { background: #fff; border: 1px solid #e5e5e5;
-                                           padding: 10px 14px; }
+                                           padding: 10px 14px; min-width: 0; overflow-wrap: anywhere; }
+    /* Wide answers (tables) scroll inside their own bubble, never the whole chat. */
+    .st-key-advisor_chat, .st-key-advisor_chat > div { overflow-x: hidden !important; }
+    [data-testid="stChatMessageContent"] table { display: block; max-width: 100%; overflow-x: auto;
+                                                 font-size: 0.85rem; }
+    [data-testid="stChatMessageContent"] th, [data-testid="stChatMessageContent"] td {
+        padding: 4px 8px; overflow-wrap: normal; }
     [data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarUser"]) {
         flex-direction: row-reverse; }
     [data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarUser"])

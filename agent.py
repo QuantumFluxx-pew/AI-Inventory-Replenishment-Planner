@@ -347,7 +347,9 @@ STRICT RULES
    mention days of cover versus lead time, and show the calculation steps the tool gave you.
 6. Be honest about limitations when relevant: stock levels are simulated, costs and lead
    time are assumptions, and SMA forecasts can lag sudden demand changes.
-7. Be concise. Use short paragraphs or bullet lists and always include units.
+7. Be concise: you answer in a NARROW chat panel. Use short paragraphs or bullet lists
+   and always include units. Only use a table if the user asks for one, and then keep it
+   to at most 4 short columns. Refer to products by name; show article IDs only if asked.
    End with a short recommended action when one applies.
 8. If the user asks about something outside inventory planning for these products,
    say briefly what you can help with."""
