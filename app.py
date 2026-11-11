@@ -629,7 +629,8 @@ with chat_col:
     with chat_box:
         for msg in st.session_state.messages:
             with st.chat_message(msg["role"]):
-                st.markdown(msg["content"])
+                # Escape "$" so money amounts never turn into math formatting.
+                st.markdown(msg["content"].replace("$", "\\$"))
                 # Show the photo of any product the advisor looked up.
                 shown = {res.get("product_id") for name, _, res in msg.get("tool_calls", [])
                          if name == "get_product_details" and isinstance(res, dict)}
