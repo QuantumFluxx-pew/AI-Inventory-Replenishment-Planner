@@ -390,7 +390,7 @@ with dashboard_col:
     k1.metric("Products Shown", summary["products"])
     k2.metric("Need Reorder", summary["need_reorder"])
     k3.metric("Sufficient Stock", summary["sufficient_stock"])
-    k4.metric("Recommended Order Units", f"{summary['recommended_order_units']:,}")
+    k4.metric("Units to Order", f"{summary['recommended_order_units']:,}")
 
     tab_overview, tab_products, tab_details, tab_settings = st.tabs(
         ["Overview", "Products", "Product Details", "Settings"])
