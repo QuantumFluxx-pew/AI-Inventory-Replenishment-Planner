@@ -100,8 +100,9 @@ st.markdown("""
                                                    border-radius: 0 !important; }
     [data-testid="stChatMessageAvatarUser"] { background: #d0021b !important; color: #fff !important;
                                               border-radius: 0 !important; }
-    [class*="st-key-suggest_"] button { text-transform: none; letter-spacing: 0;
-                                        font-weight: 500; font-size: 0.85rem; text-align: left; }
+    [class*="st-key-suggest_"] button, [class*="st-key-suggest_"] button p {
+        text-transform: none !important; letter-spacing: 0 !important;
+        font-weight: 500 !important; font-size: 0.85rem !important; }
     .try-label { font-size: 0.72rem; letter-spacing: 0.14em; text-transform: uppercase;
                  color: #555; margin: 0.6rem 0 0.2rem 0; }
     .stFormSubmitButton button[kind="primaryFormSubmit"] { background: #111; color: #fff; border-color: #111; }
