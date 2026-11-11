@@ -1,10 +1,12 @@
 # Streamlit theme settings.
-# Forces the light theme for every visitor. Without this, people whose
-# computer is in dark mode see dark charts and inputs on a white page.
+# Forces a clean light theme for every visitor (fashion-retail style:
+# white space, black type, one red accent). Without this, people whose
+# computer is in dark mode would see dark charts on a white page.
 
 [theme]
 base = "light"
-primaryColor = "#244b91"              # buttons, sliders, focus outlines
-backgroundColor = "#f5f7fb"           # page background
-secondaryBackgroundColor = "#ffffff"  # inputs, expanders, table header
-textColor = "#202b43"
+primaryColor = "#d0021b"              # red accent: buttons, active tab, focus
+backgroundColor = "#ffffff"           # page background
+secondaryBackgroundColor = "#f6f6f4"  # inputs, expanders, table header
+textColor = "#111111"
+font = "sans serif"

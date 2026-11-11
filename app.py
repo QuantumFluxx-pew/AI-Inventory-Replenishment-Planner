@@ -52,44 +52,70 @@ st.set_page_config(
 # 2. CLEAN WHITE DESIGN
 # ==========================================================
 
-# Colors (page, text, inputs) come from .streamlit/config.toml, which forces
-# the light theme. This CSS only adds card styling on top.
+# Colors come from .streamlit/config.toml (light theme, red accent).
+# This CSS adds a minimal fashion-retail look: square edges, thin black
+# lines, uppercase letter-spaced labels and generous white space.
+# (H&M-inspired style only: no H&M logo or trademarked artwork is used.)
 st.markdown("""
 <style>
-    .block-container { max-width: 1800px; padding-top: 1.5rem;
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+    html, body, [class*="css"], .stMarkdown, .stCaption, button, input, textarea {
+        font-family: 'Inter', 'Helvetica Neue', Arial, sans-serif;
+    }
+    .block-container { max-width: 1800px; padding-top: 1rem;
                        padding-left: 2rem; padding-right: 2rem; }
+    h1, h2, h3 { font-weight: 700; letter-spacing: -0.01em; color: #111; }
+    h2 { font-size: 1.35rem; text-transform: uppercase; letter-spacing: 0.06em; }
 
-    /* Metric cards */
+    /* Header band */
+    .hero { background: #111; color: #fff; padding: 22px 28px; margin-bottom: 18px;
+            border-bottom: 4px solid #d0021b; }
+    .hero .eyebrow { font-size: 0.72rem; letter-spacing: 0.22em; text-transform: uppercase;
+                     color: #bbb; margin: 0 0 6px 0; }
+    .hero h1 { color: #fff; font-size: 2rem; margin: 0; padding: 0; text-transform: none; }
+    .hero p { color: #ddd; margin: 6px 0 0 0; font-size: 0.92rem; }
+
+    /* Metric cards: flat, square, thin border */
     [data-testid="stMetric"] {
-        background: #ffffff; border: 1px solid #e3e8f0; border-radius: 14px;
-        padding: 16px; box-shadow: 0 3px 12px rgba(20, 35, 65, 0.03);
+        background: #fff; border: 1px solid #111; border-radius: 0; padding: 14px 16px;
     }
-    [data-testid="stMetricLabel"] { color: #66758b; }
+    [data-testid="stMetricLabel"] p { color: #555; text-transform: uppercase;
+                                      letter-spacing: 0.08em; font-size: 0.72rem; }
+    [data-testid="stMetricValue"] { font-weight: 700; }
 
-    /* Form controls: soft border */
-    div[data-baseweb="select"] > div, div[data-baseweb="input"] > div {
-        border: 1px solid #dbe3ef; border-radius: 9px;
+    /* Tabs: uppercase, letter-spaced */
+    button[data-baseweb="tab"] p { text-transform: uppercase; letter-spacing: 0.08em;
+                                   font-size: 0.8rem; font-weight: 600; }
+
+    /* Form controls and buttons: square edges */
+    div[data-baseweb="select"] > div, div[data-baseweb="input"] > div { border-radius: 0; }
+    .stButton button, .stDownloadButton button, .stFormSubmitButton button {
+        background: #fff; color: #111; border: 1px solid #111; border-radius: 0;
+        text-transform: uppercase; letter-spacing: 0.06em; font-size: 0.78rem; font-weight: 600;
     }
+    .stButton button:hover, .stDownloadButton button:hover, .stFormSubmitButton button:hover {
+        background: #111; color: #fff; border-color: #111;
+    }
+
+    /* Product cards (reorder strip) */
+    .pcard { border: 1px solid #e5e5e5; background: #fff; padding: 8px; height: 100%; }
+    .pcard img { width: 100%; aspect-ratio: 2 / 3; object-fit: cover; background: #f6f6f4; }
+    .pcard .pname { font-weight: 600; font-size: 0.85rem; margin-top: 6px; line-height: 1.2; }
+    .pcard .ptype { color: #666; font-size: 0.75rem; }
+    .pcard .porder { color: #d0021b; font-weight: 700; font-size: 0.85rem; margin-top: 4px; }
+    .pcard .pcover { color: #444; font-size: 0.75rem; }
 
     /* Chat messages */
-    [data-testid="stChatMessage"] {
-        background: #ffffff; border: 1px solid #e3e8f0;
-        border-radius: 12px; padding: 12px;
-    }
-
-    /* Buttons */
-    .stButton button, .stDownloadButton button, .stFormSubmitButton button {
-        background: #ffffff; color: #244b91;
-        border: 1px solid #dbe3ef; border-radius: 9px;
-    }
+    [data-testid="stChatMessage"] { background: #fff; border: 1px solid #e5e5e5;
+                                    border-radius: 0; padding: 12px; }
 
     /* Mode badge in the chat header */
-    .mode-badge { display: inline-block; padding: 3px 10px; border-radius: 999px;
-                  font-size: 0.8rem; font-weight: 600; }
-    .mode-llm { background: #e7f6ec; color: #1d6b3a; border: 1px solid #b9e3c7; }
-    .mode-offline { background: #fff4e0; color: #8a5a00; border: 1px solid #f1d39b; }
+    .mode-badge { display: inline-block; padding: 3px 10px; border-radius: 0;
+                  font-size: 0.75rem; font-weight: 600; letter-spacing: 0.04em; }
+    .mode-llm { background: #e7f6ec; color: #1d6b3a; border: 1px solid #1d6b3a; }
+    .mode-offline { background: #fff4e0; color: #8a5a00; border: 1px solid #8a5a00; }
 
-    hr { border-color: #e3e8f0; }
+    hr { border-color: #e5e5e5; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -165,7 +191,7 @@ plan = model.calculate_plan(base_df, assumptions)
 STATUS_COLORS = alt.Scale(domain=["Reorder", "Sufficient Stock"],
                           range=["#d03b3b", "#0ca30c"])
 INK = "#52514e"        # neutral dark gray for reference marks (ROP, lead time)
-ORDER_BLUE = "#2a78d6"  # single-series color for order quantities
+ORDER_BLUE = "#111111"  # single-series color for order quantities (black, retail style)
 GRID = "#e1e0d9"
 
 
@@ -249,12 +275,12 @@ def sales_history_chart(daily_sales, window, days=90):
                           f"{window}-day SMA forecast": forecast}).tail(days)
     long = frame.melt("Date", var_name="Series", value_name="Units")
     colors = alt.Scale(domain=["Actual units sold", f"{window}-day SMA forecast"],
-                       range=["#9ec5f0", "#1b4f9c"])
+                       range=["#cfcfcb", "#111111"])
     tips = [alt.Tooltip("Date:T"), alt.Tooltip("Series:N"), alt.Tooltip("Units:Q", format=".1f")]
     bars = alt.Chart(long[long["Series"] == "Actual units sold"]).mark_bar(width={"band": 0.8}).encode(
         x=alt.X("Date:T", title=None), y=alt.Y("Units:Q", title="Units per day"),
         color=alt.Color("Series:N", scale=colors), tooltip=tips)
-    line = alt.Chart(long[long["Series"] != "Actual units sold"]).mark_line(strokeWidth=2).encode(
+    line = alt.Chart(long[long["Series"] != "Actual units sold"]).mark_line(strokeWidth=2.5).encode(
         x="Date:T", y="Units:Q", color=alt.Color("Series:N", scale=colors), tooltip=tips)
     return _style(bars + line, height=240)
 
@@ -262,8 +288,15 @@ def sales_history_chart(daily_sales, window, days=90):
 # 4. HEADER
 # ==========================================================
 
-st.title("AI Inventory Replenishment Planner")
-st.caption("H&M Sales Forecasting · Moving Average · EOQ · Reorder Point · AI Assistant")
+st.markdown(
+    '<div class="hero">'
+    '<p class="eyebrow">Fashion retail · Demand forecasting · Replenishment</p>'
+    '<h1>AI Inventory Replenishment Planner</h1>'
+    "<p>Moving-average forecasts, EOQ and reorder points for 18 best-selling basics, "
+    "built on real H&amp;M sales data, with an AI assistant that explains every decision.</p>"
+    "</div>",
+    unsafe_allow_html=True,
+)
 
 if assumptions != model.DEFAULT_ASSUMPTIONS:
     st.info(
@@ -276,8 +309,6 @@ if assumptions != model.DEFAULT_ASSUMPTIONS:
         "Use *Reset to defaults* to return to the baseline."
     )
 
-st.divider()
-
 dashboard_col, chat_col = st.columns([1.8, 1], gap="large")
 
 # ==========================================================
@@ -289,12 +320,176 @@ with dashboard_col:
     st.header("Inventory Dashboard")
 
     # ------------------------------------------------------
-    # 5a. MODEL INPUTS (user can revise and rerun)
+    # 5a. FILTERS + KPI CARDS (shared by all tabs)
     # ------------------------------------------------------
-    with st.expander("⚙️ Model inputs & assumptions", expanded=False):
+    f1, f2 = st.columns(2)
+    status_filter = f1.selectbox("Inventory status", ["All", "Reorder", "Sufficient Stock"])
+    product_search = f2.text_input("Search product", placeholder="e.g. tee, slacks, socks")
+
+    filtered = plan.copy()
+    if status_filter != "All":
+        filtered = filtered[filtered["Status"] == status_filter]
+    if product_search:
+        # Match the product name, its type (e.g. 'socks') or its H&M article ID.
+        term = product_search.strip()
+        filtered = filtered[
+            filtered["Name"].str.contains(term, case=False, regex=False)
+            | filtered["Product_Type"].str.contains(term, case=False, regex=False)
+            | filtered["Product_ID"].str.contains(term, case=False, regex=False)]
+
+    summary = model.summarize(filtered)
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("Products Shown", summary["products"])
+    k2.metric("Need Reorder", summary["need_reorder"])
+    k3.metric("Sufficient Stock", summary["sufficient_stock"])
+    k4.metric("Recommended Order Units", f"{summary['recommended_order_units']:,}")
+
+    tab_overview, tab_products, tab_details, tab_settings = st.tabs(
+        ["📊 Overview", "🛍️ Products", "🔍 Product Details", "⚙️ Settings"])
+
+    # ------------------------------------------------------
+    # 5b. OVERVIEW TAB: charts
+    # ------------------------------------------------------
+    with tab_overview:
+        if filtered.empty:
+            st.info("No products match your filters.")
+        else:
+            # "Reorder now" strip: product photos, most urgent first.
+            urgent = model.prioritize(filtered).head(6)
+            if not urgent.empty:
+                st.markdown("**REORDER NOW** · most urgent first")
+                cards = st.columns(6)
+                for col, (_, r) in zip(cards, urgent.iterrows()):
+                    img = photo_uri(r["Product_ID"]) or ""
+                    col.markdown(
+                        f'<div class="pcard"><img src="{img}" alt="{r["Name"]}">'
+                        f'<div class="pname">{r["Name"]}</div>'
+                        f'<div class="ptype">{r["Product_Type"]} · {r["Colour"]}</div>'
+                        f'<div class="porder">Order {int(r["Order_Quantity"]):,}</div>'
+                        f'<div class="pcover">{r["Days_of_Cover"]:g} days of stock left</div></div>',
+                        unsafe_allow_html=True)
+                st.write("")
+
+            view = st.segmented_control(
+                "Chart", ["Stock vs. Reorder Point", "Days of Cover", "Recommended Orders"],
+                default="Stock vs. Reorder Point", label_visibility="collapsed",
+                key="chart_view") or "Stock vs. Reorder Point"
+
+            if view == "Stock vs. Reorder Point":
+                st.caption("Bar = current stock · dark tick = reorder point (ROP). "
+                           "A bar that ends at or before its tick needs reordering.")
+                chart = stock_vs_rop_chart(filtered)
+            elif view == "Days of Cover":
+                st.caption("How long current stock lasts at forecast demand. Products left "
+                           "of the dashed line run out before a new order could arrive. "
+                           "Products with zero forecast demand are not shown.")
+                chart = days_of_cover_chart(filtered, assumptions.lead_time_days)
+            else:
+                chart = None
+                if (filtered["Order_Quantity"] > 0).any():
+                    st.caption("Largest recommended orders (EOQ), up to 10 products.")
+                    chart = order_quantity_chart(filtered)
+                else:
+                    st.info("No products in this selection need an order.")
+            if chart is not None:
+                st.altair_chart(chart, width="stretch", height=chart.height)
+
+    # ------------------------------------------------------
+    # 5c. PRODUCTS TAB: table with photos + download
+    # ------------------------------------------------------
+    with tab_products:
+        # Display copy with an icon + label for status (never color alone).
+        table = filtered.copy()
+        table["Status"] = table["Status"].map(
+            {"Reorder": "🔴 Reorder", "Sufficient Stock": "🟢 Sufficient"})
+        table["Photo"] = table["Product_ID"].map(photo_uri)
+        table_cols = ["Photo", "Name", "Product_Type", "Status", "Current_Stock", "ROP",
+                      "Order_Quantity", "EOQ", "Days_of_Cover", "Daily_Demand", "MAE",
+                      "Annual_Demand", "Safety_Stock", "Product_ID"]
+        st.dataframe(
+            table[table_cols],
+            width="stretch", hide_index=True, height=560, row_height=56,
+            column_config={
+                "Photo": st.column_config.ImageColumn("Photo", width="small"),
+                "Name": st.column_config.TextColumn("Product"),
+                "Product_Type": st.column_config.TextColumn("Type"),
+                "Product_ID": st.column_config.TextColumn("H&M Article ID"),
+                "MAE": st.column_config.NumberColumn(
+                    "Forecast MAE", format="%.2f",
+                    help="Average forecast error of the moving average, units/day (back-tested over the year)"),
+                "Current_Stock": st.column_config.NumberColumn("Stock", help="Units on hand (simulated)"),
+                "ROP": st.column_config.NumberColumn("Reorder Point", help="Reorder when stock ≤ this"),
+                "Order_Quantity": st.column_config.NumberColumn("Order Now", help="Units to order (EOQ if reordering)"),
+                "EOQ": st.column_config.NumberColumn("EOQ", help="Economic order quantity"),
+                "Days_of_Cover": st.column_config.NumberColumn("Days of Cover", format="%.1f",
+                                                               help="Stock ÷ forecast daily demand"),
+                "Daily_Demand": st.column_config.NumberColumn("Daily Demand", format="%.2f"),
+                "Annual_Demand": st.column_config.NumberColumn("Annual Demand", format="%.0f"),
+                "Safety_Stock": st.column_config.NumberColumn("Safety Stock", format="%.1f"),
+            },
+        )
+        download_cols = ["Product_ID", "Name", "Product_Type", "Colour", "Current_Stock", "SMA",
+                         "MAE", "Daily_Demand", "Annual_Demand", "EOQ", "Safety_Stock", "ROP",
+                         "Days_of_Cover", "Status", "Order_Quantity", "Annual_Cost"]
+        st.download_button(
+            "Download Inventory Results",
+            data=filtered[download_cols].to_csv(index=False).encode("utf-8"),
+            file_name="inventory_results_filtered.csv",
+            mime="text/csv",
+        )
+
+    # ------------------------------------------------------
+    # 5d. PRODUCT DETAILS TAB: each calculation step
+    # ------------------------------------------------------
+    with tab_details:
+        names = dict(zip(plan["Product_ID"], plan["Name"]))
+        chosen = st.selectbox("Choose a product", plan["Product_ID"].tolist(),
+                              format_func=lambda pid: names[pid])
+        detail = InventoryTools(base_df, assumptions).get_product_details(chosen)
+
+        pic_col, info_col = st.columns([1, 3])
+        with pic_col:
+            if os.path.exists(model.image_path(chosen)):
+                st.image(model.image_path(chosen), width="stretch")
+        with info_col:
+            st.markdown(f"**{detail['name']}** · {detail['product_type']} · {detail['colour']}")
+            if detail["description"]:
+                st.caption(detail["description"])
+            st.caption(f"H&M article ID {detail['product_id']}")
+            status_icon = "🔴" if detail["status"] == "Reorder" else "🟢"
+            st.markdown(f"{status_icon} **{detail['status']}** · stock {detail['current_stock']} units · "
+                        f"{detail['days_of_cover']} days of cover")
+
+        # Full-width row so the numbers are never cut off.
+        d1, d2, d3, d4 = st.columns(4)
+        d1.metric("Forecast (units/day)", f"{detail['daily_demand_forecast']:.2f}")
+        d2.metric("Reorder Point", detail["reorder_point"])
+        d3.metric("EOQ", detail["eoq"])
+        d4.metric("Order Now", detail["recommended_order_units"])
+
+        steps = detail["calculation_steps"]
+        st.markdown(
+            f"1. **Forecast:** average of the last {detail['sma_window_days']} days of sales = "
+            f"`{detail['sma_forecast_units_per_day']} units/day`\n"
+            f"2. **Annual demand:** `{steps['annual_demand']}`\n"
+            f"3. **EOQ:** `{steps['eoq']}`\n"
+            f"4. **Reorder point:** `{steps['reorder_point']}`\n"
+            f"5. **Decision:** `{steps['decision_rule']}`"
+        )
+
+        st.markdown(f"**Sales history vs. forecast (last 90 days)**: forecast accuracy "
+                    f"(MAE over the year) = **{detail['forecast_mae_units_per_day']:.2f} units/day**")
+        chart = sales_history_chart(sales_df[chosen], assumptions.sma_window)
+        st.altair_chart(chart, width="stretch", height=chart.height)
+
+    # ------------------------------------------------------
+    # 5e. SETTINGS TAB: model inputs (user can revise and rerun)
+    # ------------------------------------------------------
+    with tab_settings:
         st.caption(
             "The H&M data has real sales but no costs, lead times or stock levels, "
-            "so these are labelled assumptions. Change them and click **Recalculate**."
+            "so these are labelled assumptions. Change them and click **Recalculate**; "
+            "every tab and the assistant use the new values."
         )
         with st.form("assumptions_form"):
             c1, c2, c3 = st.columns(3)
@@ -342,161 +537,11 @@ with dashboard_col:
             st.session_state.assumptions = model.DEFAULT_ASSUMPTIONS
             st.rerun()
 
-    # ------------------------------------------------------
-    # 5b. FILTERS
-    # ------------------------------------------------------
-    f1, f2 = st.columns(2)
-    status_filter = f1.selectbox("Inventory status", ["All", "Reorder", "Sufficient Stock"])
-    product_search = f2.text_input("Search product", placeholder="e.g. tee, slacks, socks")
-
-    filtered = plan.copy()
-    if status_filter != "All":
-        filtered = filtered[filtered["Status"] == status_filter]
-    if product_search:
-        # Match the product name, its type (e.g. 'socks') or its H&M article ID.
-        term = product_search.strip()
-        filtered = filtered[
-            filtered["Name"].str.contains(term, case=False, regex=False)
-            | filtered["Product_Type"].str.contains(term, case=False, regex=False)
-            | filtered["Product_ID"].str.contains(term, case=False, regex=False)]
-
-    # ------------------------------------------------------
-    # 5c. KPI CARDS
-    # ------------------------------------------------------
-    summary = model.summarize(filtered)
-    k1, k2, k3, k4 = st.columns(4)
-    k1.metric("Products Shown", summary["products"])
-    k2.metric("Need Reorder", summary["need_reorder"])
-    k3.metric("Sufficient Stock", summary["sufficient_stock"])
-    k4.metric("Recommended Order Units", f"{summary['recommended_order_units']:,}")
-
-    st.divider()
-
-    # ------------------------------------------------------
-    # 5d. CHARTS
-    # ------------------------------------------------------
-    if filtered.empty:
-        st.info("No products match your filters.")
-    else:
-        # Tabs keep three charts in the space of one.
-        tab_stock, tab_cover, tab_orders = st.tabs(
-            ["Stock vs. Reorder Point", "Days of Cover", "Recommended Orders"])
-
-        with tab_stock:
-            st.caption("Bar = current stock · dark tick = reorder point (ROP). "
-                       "A bar that ends at or before its tick needs reordering.")
-            chart = stock_vs_rop_chart(filtered)
-            st.altair_chart(chart, width="stretch", height=chart.height)
-
-        with tab_cover:
-            st.caption("How long current stock lasts at forecast demand. Products left "
-                       "of the dashed line run out before a new order could arrive. "
-                       "Products with zero forecast demand are not shown.")
-            chart = days_of_cover_chart(filtered, assumptions.lead_time_days)
-            st.altair_chart(chart, width="stretch", height=chart.height)
-
-        with tab_orders:
-            if (filtered["Order_Quantity"] > 0).any():
-                st.caption("Largest recommended orders (EOQ), up to 10 products.")
-                chart = order_quantity_chart(filtered)
-                st.altair_chart(chart, width="stretch", height=chart.height)
-            else:
-                st.info("No products in this selection need an order.")
-
-    # ------------------------------------------------------
-    # 5e. PRODUCT TABLE + DOWNLOAD
-    # ------------------------------------------------------
-    st.subheader("Product Inventory Details")
-
-    # Display copy with an icon + label for status (never color alone).
-    table = filtered.copy()
-    table["Status"] = table["Status"].map(
-        {"Reorder": "🔴 Reorder", "Sufficient Stock": "🟢 Sufficient"})
-    table["Photo"] = table["Product_ID"].map(photo_uri)
-    table_cols = ["Photo", "Name", "Product_Type", "Status", "Current_Stock", "ROP",
-                  "Order_Quantity", "EOQ", "Days_of_Cover", "Daily_Demand", "MAE",
-                  "Annual_Demand", "Safety_Stock", "Product_ID"]
-    st.dataframe(
-        table[table_cols],
-        width="stretch", hide_index=True, height=420, row_height=56,
-        column_config={
-            "Photo": st.column_config.ImageColumn("Photo", width="small"),
-            "Name": st.column_config.TextColumn("Product"),
-            "Product_Type": st.column_config.TextColumn("Type"),
-            "Product_ID": st.column_config.TextColumn("H&M Article ID"),
-            "MAE": st.column_config.NumberColumn(
-                "Forecast MAE", format="%.2f",
-                help="Average forecast error of the moving average, units/day (back-tested over the year)"),
-            "Current_Stock": st.column_config.NumberColumn("Stock", help="Units on hand (simulated)"),
-            "ROP": st.column_config.NumberColumn("Reorder Point", help="Reorder when stock ≤ this"),
-            "Order_Quantity": st.column_config.NumberColumn("Order Now", help="Units to order (EOQ if reordering)"),
-            "EOQ": st.column_config.NumberColumn("EOQ", help="Economic order quantity"),
-            "Days_of_Cover": st.column_config.NumberColumn("Days of Cover", format="%.1f",
-                                                           help="Stock ÷ forecast daily demand"),
-            "Daily_Demand": st.column_config.NumberColumn("Daily Demand", format="%.2f"),
-            "Annual_Demand": st.column_config.NumberColumn("Annual Demand", format="%.0f"),
-            "Safety_Stock": st.column_config.NumberColumn("Safety Stock", format="%.1f"),
-        },
-    )
-    download_cols = ["Product_ID", "Name", "Product_Type", "Colour", "Current_Stock", "SMA",
-                     "MAE", "Daily_Demand", "Annual_Demand", "EOQ", "Safety_Stock", "ROP",
-                     "Days_of_Cover", "Status", "Order_Quantity", "Annual_Cost"]
-    st.download_button(
-        "Download Inventory Results",
-        data=filtered[download_cols].to_csv(index=False).encode("utf-8"),
-        file_name="inventory_results_filtered.csv",
-        mime="text/csv",
-    )
-
-    # ------------------------------------------------------
-    # 5f. PRODUCT DRILL-DOWN: shows each calculation step
-    # ------------------------------------------------------
-    st.subheader("How a Recommendation Is Calculated")
-    names = dict(zip(plan["Product_ID"], plan["Name"]))
-    chosen = st.selectbox("Choose a product", plan["Product_ID"].tolist(),
-                          format_func=lambda pid: names[pid])
-    detail = InventoryTools(base_df, assumptions).get_product_details(chosen)
-
-    pic_col, info_col = st.columns([1, 3])
-    with pic_col:
-        if os.path.exists(model.image_path(chosen)):
-            st.image(model.image_path(chosen), width="stretch")
-    with info_col:
-        st.markdown(f"**{detail['name']}** · {detail['product_type']} · {detail['colour']}")
-        if detail["description"]:
-            st.caption(detail["description"])
-        st.caption(f"H&M article ID {detail['product_id']}")
-        status_icon = "🔴" if detail["status"] == "Reorder" else "🟢"
-        st.markdown(f"{status_icon} **{detail['status']}** · stock {detail['current_stock']} units · "
-                    f"{detail['days_of_cover']} days of cover")
-
-    # Full-width row so the numbers are never cut off.
-    d1, d2, d3, d4 = st.columns(4)
-    d1.metric("Forecast (units/day)", f"{detail['daily_demand_forecast']:.2f}")
-    d2.metric("Reorder Point", detail["reorder_point"])
-    d3.metric("EOQ", detail["eoq"])
-    d4.metric("Order Now", detail["recommended_order_units"])
-
-    steps = detail["calculation_steps"]
-    st.markdown(
-        f"1. **Forecast:** average of the last {detail['sma_window_days']} days of sales = "
-        f"`{detail['sma_forecast_units_per_day']} units/day`\n"
-        f"2. **Annual demand:** `{steps['annual_demand']}`\n"
-        f"3. **EOQ:** `{steps['eoq']}`\n"
-        f"4. **Reorder point:** `{steps['reorder_point']}`\n"
-        f"5. **Decision:** `{steps['decision_rule']}`"
-    )
-
-    st.markdown(f"**Sales history vs. forecast (last 90 days)**: forecast accuracy "
-                f"(MAE over the year) = **{detail['forecast_mae_units_per_day']:.2f} units/day**")
-    history = sales_df[chosen]
-    chart = sales_history_chart(history, assumptions.sma_window)
-    st.altair_chart(chart, width="stretch", height=chart.height)
-
     st.caption(
         "Data: H&M Personalized Fashion Recommendations (Kaggle), 18 steady-selling products, "
         f"real daily sales {sales_df.index.min():%Y-%m-%d} to {sales_df.index.max():%Y-%m-%d}. "
-        "Current stock is simulated; costs and lead time are assumptions."
+        "Current stock is simulated; costs and lead time are assumptions. "
+        "Student project using public H&M data; not affiliated with or endorsed by H&M."
     )
 
 # ==========================================================
