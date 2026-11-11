@@ -2,7 +2,7 @@
 app.py: AI Inventory & Replenishment Planner (Streamlit)
 
 Left panel : inventory dashboard (KPIs, charts, table, product drill-down)
-Right panel: AI Inventory Agent (AI chat)
+Right panel: Stock Pilot (AI inventory agent chat)
 
 Files this app uses:
     inventory_model.py   - SMA / MAE / EOQ / ROP calculations (the embedded models)
@@ -81,7 +81,7 @@ st.markdown("""
     h2.assist-title { font-family: 'Space Grotesk', 'Helvetica Neue', Arial, sans-serif !important;
                       font-weight: 700; letter-spacing: 0.01em; }
 
-    /* AI Inventory Agent chat panel */
+    /* Stock Pilot chat panel */
     .advisor-sub { color: #555; margin: -0.5rem 0 0.6rem 0; font-size: 0.95rem; }
     .st-key-advisor_chat { background: #faf9f6; border: 1px solid #111 !important;
                            border-radius: 0 !important; }
@@ -195,7 +195,7 @@ if not isinstance(st.session_state.get("assumptions"), model.Assumptions):
     st.session_state.assumptions = model.DEFAULT_ASSUMPTIONS
 
 GREETING = (
-    "Hello! I'm your AI Inventory Agent for 18 H&M products, "
+    "Hello! I'm Stock Pilot, your AI inventory agent for 18 H&M products, "
     "from basics like the *Brit Baby Tee* to the *Pluto RW slacks*. I can tell "
     "you which products to reorder, how many units to order, why, and what "
     "happens if demand, lead time, costs or the forecast window change.\n\n"
@@ -588,8 +588,8 @@ with chat_col:
 
     st.markdown(
         '<div class="advisor-head">'
-        '<h2 class="panel-title assist-title">AI Inventory Agent</h2>'
-        '<p class="advisor-sub">Ask what to reorder, how much and why.</p></div>',
+        '<h2 class="panel-title assist-title">Stock Pilot</h2>'
+        '<p class="advisor-sub">Your AI inventory agent: ask what to reorder, how much and why.</p></div>',
         unsafe_allow_html=True)
 
     if AI_ENABLED:
@@ -639,7 +639,7 @@ with chat_col:
     # A form keeps the input inside the right column.
     with st.form("chat_form", clear_on_submit=True, border=False):
         in_col, send_col = st.columns([3, 1], vertical_alignment="bottom")
-        typed = in_col.text_input("Your question", placeholder="Ask the AI Inventory Agent...",
+        typed = in_col.text_input("Your question", placeholder="Ask Stock Pilot...",
                                   label_visibility="collapsed")
         sent = send_col.form_submit_button("Ask", width="stretch", type="primary")
 
