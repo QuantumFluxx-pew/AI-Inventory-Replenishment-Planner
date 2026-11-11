@@ -295,12 +295,7 @@ def sales_history_chart(daily_sales, window, days=90):
 # ==========================================================
 
 st.markdown(
-    '<div class="hero">'
-    '<p class="eyebrow">Fashion retail · Demand forecasting · Replenishment</p>'
-    '<h1>AI Inventory Replenishment Planner</h1>'
-    "<p>Moving-average forecasts, EOQ and reorder points for 18 best-selling basics, "
-    "built on real H&amp;M sales data, with an AI assistant that explains every decision.</p>"
-    "</div>",
+    '<div class="hero"><h1>AI Inventory Replenishment Planner</h1></div>',
     unsafe_allow_html=True,
 )
 
