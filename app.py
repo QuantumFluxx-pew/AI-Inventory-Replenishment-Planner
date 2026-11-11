@@ -593,7 +593,7 @@ with dashboard_col:
 
     st.caption(
         f"Data: H&M sales (Kaggle), {sales_df.index.min():%b %Y} to {sales_df.index.max():%b %Y} · "
-        "Stock is simulated · Student project, not affiliated with H&M"
+        "Stock is simulated · Not affiliated with H&M"
     )
 
 # ==========================================================
