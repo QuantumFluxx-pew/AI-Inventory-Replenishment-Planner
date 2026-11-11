@@ -323,7 +323,7 @@ dashboard_col, chat_col = st.columns([1.8, 1], gap="large")
 
 with dashboard_col:
 
-    st.header("Inventory Dashboard")
+    st.header("Inventory Dashboard", anchor=False)
 
     # ------------------------------------------------------
     # 5a. FILTERS + KPI CARDS (shared by all tabs)
@@ -555,7 +555,7 @@ with dashboard_col:
 
 with chat_col:
 
-    st.header("Inventory Assistant")
+    st.header("Inventory Assistant", anchor=False)
 
     if AI_ENABLED:
         st.markdown(
