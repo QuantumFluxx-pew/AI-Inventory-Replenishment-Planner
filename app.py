@@ -62,7 +62,7 @@ st.markdown("""
     html, body, [class*="css"], .stMarkdown, .stCaption, button, input, textarea {
         font-family: 'Inter', 'Helvetica Neue', Arial, sans-serif;
     }
-    .block-container { max-width: 1800px; padding-top: 1rem;
+    .block-container { max-width: 1800px; padding-top: 3.2rem;
                        padding-left: 2rem; padding-right: 2rem; }
     h1, h2, h3 { font-weight: 700; letter-spacing: -0.01em; color: #111; }
     h2 { font-size: 1.35rem; text-transform: uppercase; letter-spacing: 0.06em; }
@@ -594,9 +594,9 @@ with chat_col:
                    "What if demand increases by 20%?",
                    "Why does Lucy blouse need replenishment?"]
     picked = None
-    s_cols = st.columns(len(suggestions))
-    for col, text in zip(s_cols, suggestions):
-        if col.button(text, width="stretch"):
+    st.caption("Try asking:")
+    for text in suggestions:   # stacked so the full question is always readable
+        if st.button(text, width="stretch", key=f"suggest_{text}"):
             picked = text
 
     # A form keeps the input inside the right column.
