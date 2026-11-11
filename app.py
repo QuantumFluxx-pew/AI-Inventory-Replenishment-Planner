@@ -385,11 +385,14 @@ with dashboard_col:
             | filtered["Product_ID"].str.contains(term, case=False, regex=False)]
 
     summary = model.summarize(filtered)
+    st.caption(f"Showing {summary['products']} of {len(plan)} products")
     k1, k2, k3, k4 = st.columns(4)
-    k1.metric("Products Shown", summary["products"])
-    k2.metric("Need Reorder", summary["need_reorder"])
-    k3.metric("Sufficient Stock", summary["sufficient_stock"])
-    k4.metric("Units to Order", f"{summary['recommended_order_units']:,}")
+    k1.metric("Need Reorder", summary["need_reorder"])
+    k2.metric("Sufficient Stock", summary["sufficient_stock"])
+    k3.metric("Units to Order", f"{summary['recommended_order_units']:,}")
+    k4.metric("Annual Cost", f"${summary['total_annual_policy_cost']:,.0f}",
+              help="Yearly ordering + holding cost of the EOQ policy for the products shown "
+                   "(uses the assumed ordering and holding costs).")
 
     # A key keeps the open tab across reruns, so Recalculate stays on Settings.
     tab_overview, tab_products, tab_details, tab_settings = st.tabs(
@@ -453,7 +456,7 @@ with dashboard_col:
         table["Photo"] = table["Product_ID"].map(photo_uri)
         table_cols = ["Photo", "Name", "Product_Type", "Status", "Current_Stock", "ROP",
                       "Order_Quantity", "EOQ", "Days_of_Cover", "Daily_Demand", "MAE",
-                      "Annual_Demand", "Safety_Stock", "Product_ID"]
+                      "Annual_Demand", "Annual_Cost", "Safety_Stock", "Product_ID"]
         st.dataframe(
             table[table_cols],
             width="stretch", hide_index=True, height=560, row_height=56,
@@ -473,6 +476,9 @@ with dashboard_col:
                                                                help="Stock ÷ forecast daily demand"),
                 "Daily_Demand": st.column_config.NumberColumn("Daily Demand", format="%.2f"),
                 "Annual_Demand": st.column_config.NumberColumn("Annual Demand", format="%.0f"),
+                "Annual_Cost": st.column_config.NumberColumn(
+                    "Annual Cost", format="$%.0f",
+                    help="Yearly ordering + holding cost when ordering EOQ units each time"),
                 "Safety_Stock": st.column_config.NumberColumn("Safety Stock", format="%.1f"),
             },
         )
@@ -521,7 +527,8 @@ with dashboard_col:
             f"2. **Annual demand:** `{steps['annual_demand']}`\n"
             f"3. **EOQ:** `{steps['eoq']}`\n"
             f"4. **Reorder point:** `{steps['reorder_point']}`\n"
-            f"5. **Decision:** `{steps['decision_rule']}`"
+            f"5. **Decision:** `{steps['decision_rule']}`\n"
+            f"6. **Annual cost:** `{steps['annual_cost']}`"
         )
 
         st.markdown(f"**Sales history vs. forecast (last 90 days)**: forecast accuracy "
@@ -615,13 +622,21 @@ with dashboard_col:
             diff = all_summary[key] - base_summary[key]
             return f"{diff:+,} vs. default" if diff else "same as default"
 
-        r1, r2, r3 = st.columns(3)
+        r1, r2, r3, r4 = st.columns(4)
         r1.metric("Need Reorder", all_summary["need_reorder"],
                   delta=_delta("need_reorder"), delta_color="off")
         r2.metric("Sufficient Stock", all_summary["sufficient_stock"],
                   delta=_delta("sufficient_stock"), delta_color="off")
         r3.metric("Units to Order", f"{all_summary['recommended_order_units']:,}",
                   delta=_delta("recommended_order_units"), delta_color="off")
+        cost_delta = None
+        if modified:
+            diff = all_summary["total_annual_policy_cost"] - base_summary["total_annual_policy_cost"]
+            cost_delta = (f"{'+' if diff >= 0 else '-'}${abs(diff):,.0f} vs. default"
+                          if round(diff) else "same as default")
+        r4.metric("Annual Cost", f"${all_summary['total_annual_policy_cost']:,.0f}",
+                  delta=cost_delta, delta_color="off",
+                  help="Yearly ordering + holding cost of the EOQ policy for all 18 products.")
         if modified:
             st.caption("Click **Reset to defaults** to go back to the baseline.")
         to_order = plan[plan["Status"] == "Reorder"].sort_values("Days_of_Cover")

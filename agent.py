@@ -129,6 +129,11 @@ class InventoryTools:
         row = plan[plan["Product_ID"] == pid].iloc[0]
         a = self.assumptions
 
+        # Annual cost of the EOQ policy, split into its two parts.
+        orders_per_year = row["Annual_Demand"] / row["EOQ"] if row["EOQ"] > 0 else 0.0
+        ordering = orders_per_year * a.ordering_cost
+        holding = row["EOQ"] / 2 * a.holding_cost
+
         lead_time_demand = row["Daily_Demand"] * a.lead_time_days
         details = _product_row(row)
         details.update({
@@ -141,6 +146,8 @@ class InventoryTools:
             "lead_time_days": a.lead_time_days,
             "units_below_reorder_point": int(row["Shortfall"]),
             "annual_policy_cost": float(row["Annual_Cost"]),
+            "annual_ordering_cost": round(ordering, 2),
+            "annual_holding_cost": round(holding, 2),
             "calculation_steps": {
                 "annual_demand": f"{row['Daily_Demand']:.4f} units/day x 365 = {row['Annual_Demand']:.2f}",
                 "eoq": (
@@ -156,6 +163,11 @@ class InventoryTools:
                     f"stock {int(row['Current_Stock'])} "
                     f"{'<=' if row['Status'] == 'Reorder' else '>'} ROP {int(row['ROP'])}"
                     f" -> {row['Status']}"
+                ),
+                "annual_cost": (
+                    f"ordering {orders_per_year:.1f} orders/yr x ${a.ordering_cost:g} = ${ordering:,.2f}"
+                    f" + holding {int(row['EOQ'])}/2 x ${a.holding_cost:g} = ${holding:,.2f}"
+                    f" -> ${row['Annual_Cost']:,.2f} per year"
                 ),
             },
         })
