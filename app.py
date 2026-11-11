@@ -592,10 +592,8 @@ with dashboard_col:
             st.rerun()
 
     st.caption(
-        "Data: H&M Personalized Fashion Recommendations (Kaggle), 18 steady-selling products, "
-        f"real daily sales {sales_df.index.min():%Y-%m-%d} to {sales_df.index.max():%Y-%m-%d}. "
-        "Current stock is simulated; costs and lead time are assumptions. "
-        "Student project using public H&M data; not affiliated with or endorsed by H&M."
+        f"Data: H&M sales (Kaggle), {sales_df.index.min():%b %Y} to {sales_df.index.max():%b %Y} · "
+        "Stock is simulated · Student project, not affiliated with H&M"
     )
 
 # ==========================================================
