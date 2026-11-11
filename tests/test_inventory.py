@@ -74,6 +74,19 @@ def test_brit_tee_full_calculation(base):
     assert r["Current_Stock"] == 65 and r["Status"] == "Reorder"  # stock == ROP -> reorder
 
 
+def test_annual_cost_by_hand(base, tools):
+    # Brit Baby Tee: D = 65/7 x 365 = 3,389.3 units/yr, EOQ = 412
+    # ordering = D/EOQ x $50 = $411.32, holding = 412/2 x $2 = $412.00 -> $823.32
+    r = row(m.calculate_plan(base), BRIT_TEE)
+    assert r["Annual_Cost"] == pytest.approx(823.32, abs=0.01)
+    detail = tools.call("get_product_details", {"product_id": BRIT_TEE})
+    assert detail["annual_ordering_cost"] == pytest.approx(411.32, abs=0.01)
+    assert detail["annual_holding_cost"] == pytest.approx(412.00, abs=0.01)
+    # At the EOQ, ordering and holding costs are (almost) equal: EOQ is rounded up.
+    assert abs(detail["annual_ordering_cost"] - detail["annual_holding_cost"]) < 1
+    assert m.summarize(m.calculate_plan(base))["total_annual_policy_cost"] == pytest.approx(22246.17, abs=0.01)
+
+
 def test_eoq_hand_calculation():
     # sqrt(2 * 1000 * 50 / 2) = sqrt(50000) = 223.6 -> 224
     assert m.economic_order_quantity([1000], 50, 2)[0] == 224
