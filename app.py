@@ -57,20 +57,20 @@ st.set_page_config(
 # (H&M-inspired style only: no H&M logo or trademarked artwork is used.)
 st.markdown("""
 <style>
-    /* Fonts: Bodoni Moda (fashion-magazine serif) for headings,
+    /* Fonts: Montserrat (bold, modern retail style) for headings,
        DM Sans (clean modern sans) for everything else. */
-    @import url('https://fonts.googleapis.com/css2?family=Bodoni+Moda:opsz,wght@6..96,500;6..96,700&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,700&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@600;700;800&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,700&display=swap');
     html, body, .stApp, .stMarkdown, .stCaption, p, li, label, input, textarea, button,
     [data-testid="stMetricValue"], [data-testid="stMetricLabel"], [data-baseweb="tab"] {
         font-family: 'DM Sans', 'Helvetica Neue', Arial, sans-serif !important;
     }
     h1, h2, h3, .hero h1 {
-        font-family: 'Bodoni Moda', 'Didot', Georgia, serif !important;
-        font-weight: 700; letter-spacing: 0.01em; color: #111;
+        font-family: 'Montserrat', 'Helvetica Neue', Arial, sans-serif !important;
+        font-weight: 800; letter-spacing: 0.02em; color: #111;
     }
     .block-container { max-width: 1800px; padding-top: 3.2rem;
                        padding-left: 2rem; padding-right: 2rem; }
-    h2 { font-size: 1.6rem; text-transform: uppercase; letter-spacing: 0.08em; }
+    h2 { font-size: 1.45rem; text-transform: uppercase; letter-spacing: 0.06em; }
 
     /* Header band */
     .hero { background: #111; color: #fff; padding: 22px 28px; margin-bottom: 18px;
@@ -78,7 +78,7 @@ st.markdown("""
     .hero .eyebrow { font-size: 0.72rem; letter-spacing: 0.22em; text-transform: uppercase;
                      color: #bbb; margin: 0 0 6px 0; }
     .hero h1 { color: #fff !important; font-size: 2.4rem; margin: 0; padding: 0;
-               text-transform: none; font-weight: 500; }
+               text-transform: none; font-weight: 700; letter-spacing: 0.01em; }
     .hero p { color: #ddd; margin: 6px 0 0 0; font-size: 0.92rem; }
 
     /* Metric cards: flat, square, thin border */
