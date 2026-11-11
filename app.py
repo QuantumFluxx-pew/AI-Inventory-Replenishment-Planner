@@ -43,7 +43,6 @@ OfflineAssistant = agent_module.OfflineAssistant
 
 st.set_page_config(
     page_title="AI Inventory Replenishment Planner",
-    page_icon="📦",
     layout="wide",
     initial_sidebar_state="collapsed",
 )
@@ -345,7 +344,7 @@ with dashboard_col:
     k4.metric("Recommended Order Units", f"{summary['recommended_order_units']:,}")
 
     tab_overview, tab_products, tab_details, tab_settings = st.tabs(
-        ["📊 Overview", "🛍️ Products", "🔍 Product Details", "⚙️ Settings"])
+        ["Overview", "Products", "Product Details", "Settings"])
 
     # ------------------------------------------------------
     # 5b. OVERVIEW TAB: charts
@@ -398,10 +397,10 @@ with dashboard_col:
     # 5c. PRODUCTS TAB: table with photos + download
     # ------------------------------------------------------
     with tab_products:
-        # Display copy with an icon + label for status (never color alone).
+        # Status shown as a text label, so meaning never depends on color.
         table = filtered.copy()
         table["Status"] = table["Status"].map(
-            {"Reorder": "🔴 Reorder", "Sufficient Stock": "🟢 Sufficient"})
+            {"Reorder": "Reorder", "Sufficient Stock": "Sufficient"})
         table["Photo"] = table["Product_ID"].map(photo_uri)
         table_cols = ["Photo", "Name", "Product_Type", "Status", "Current_Stock", "ROP",
                       "Order_Quantity", "EOQ", "Days_of_Cover", "Daily_Demand", "MAE",
@@ -456,8 +455,7 @@ with dashboard_col:
             if detail["description"]:
                 st.caption(detail["description"])
             st.caption(f"H&M article ID {detail['product_id']}")
-            status_icon = "🔴" if detail["status"] == "Reorder" else "🟢"
-            st.markdown(f"{status_icon} **{detail['status']}** · stock {detail['current_stock']} units · "
+            st.markdown(f"**{detail['status']}** · stock {detail['current_stock']} units · "
                         f"{detail['days_of_cover']} days of cover")
 
         # Full-width row so the numbers are never cut off.
@@ -582,7 +580,7 @@ with chat_col:
                     if os.path.exists(model.image_path(pid)):
                         st.image(model.image_path(pid), width=110)
                 if msg.get("tool_calls"):
-                    with st.expander(f"🔧 Tools used ({len(msg['tool_calls'])})"):
+                    with st.expander(f"Tools used ({len(msg['tool_calls'])})"):
                         for name, args, result in msg["tool_calls"]:
                             st.markdown(f"**{name}**(`{args}`)")
                             st.json(result, expanded=False)
