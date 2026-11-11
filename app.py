@@ -100,6 +100,8 @@ st.markdown("""
                                                    border-radius: 0 !important; }
     [data-testid="stChatMessageAvatarUser"] { background: #d0021b !important; color: #fff !important;
                                               border-radius: 0 !important; }
+    [class*="st-key-suggest_"] button { text-transform: none; letter-spacing: 0;
+                                        font-weight: 500; font-size: 0.85rem; text-align: left; }
     .try-label { font-size: 0.72rem; letter-spacing: 0.14em; text-transform: uppercase;
                  color: #555; margin: 0.6rem 0 0.2rem 0; }
     .stFormSubmitButton button[kind="primaryFormSubmit"] { background: #111; color: #fff; border-color: #111; }
@@ -635,10 +637,10 @@ with chat_col:
 
     # A form keeps the input inside the right column.
     with st.form("chat_form", clear_on_submit=True, border=False):
-        in_col, send_col = st.columns([4, 1], vertical_alignment="bottom")
+        in_col, send_col = st.columns([3, 1], vertical_alignment="bottom")
         typed = in_col.text_input("Your question", placeholder="Ask the Restock Advisor...",
                                   label_visibility="collapsed")
-        sent = send_col.form_submit_button("Send", width="stretch", type="primary")
+        sent = send_col.form_submit_button("Ask", width="stretch", type="primary")
 
     if st.button("Clear conversation", key="clear_chat", type="tertiary"):
         st.session_state.messages = [{"role": "assistant", "content": GREETING}]
