@@ -55,7 +55,7 @@ Tools the agent can call:
 * `reset_assumptions`
 * `get_assumptions`
 
-The agent **asks for missing inputs** ("increase demand by how much?") instead of guessing. Unclear products are resolved by name, type or article ID; for example, "t-shirt" makes it ask which of the three tees. Each answer has a **"Tools used"** panel showing every tool call and its result.
+The agent **asks for missing inputs** ("increase demand by how much?") instead of guessing. Unclear products are resolved by name, type or article ID; for example, "t-shirt" makes it ask which of the three tees. Each answer has a **"Tools used"** panel showing every tool call and its result, and an automatic **number check**: every number in the answer is compared with the model's results (rounding allowed). A green line means all numbers came from Python; otherwise it lists the numbers it could not find. Limit: an invented number that happens to equal a real model number would not be caught.
 
 **Two modes, always labelled in the app:**
 
@@ -75,7 +75,7 @@ The agent **asks for missing inputs** ("increase demand by how much?") instead o
 | `kaggle/hm_select_products.py` | Step 1: runs on Kaggle to pick steady products from 31M purchases |
 | `prepare_data.py` | Step 2: cleans the Kaggle output into `data/` and `images/` |
 | `notebooks/…HM.ipynb` | Colab notebook: the full model walk-through with tests |
-| `tests/test_inventory.py` | 25 automated tests |
+| `tests/test_inventory.py` | 29 automated tests |
 | `.streamlit/config.toml` | Forces the light theme |
 
 ## Run it on your computer

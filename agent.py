@@ -368,6 +368,110 @@ class AgentReply:
 
 
 # ======================================================================
+# 2b. NUMBER CHECK: does every number in the answer come from the model?
+# ======================================================================
+# The LLM is told never to calculate. This check proves it, answer by answer:
+# every number the agent writes must appear in a Python tool result from
+# this conversation (rounding allowed), in the user's own question, or be a
+# simple difference of two model results (e.g. "up 914 units").
+
+_NUMBER = re.compile(r"(?<![\w.])-?\d[\d,]*(?:\.\d+)?")
+_LIST_MARKER = re.compile(r"(?m)^\s*(?:[-*]\s*)?\**\d{1,2}[.)]\**\s")
+_EXAMPLES = re.compile(r"(?i)\b(?:for example|e\.g\.|such as|for instance)\b[^.?!\n)]*")
+
+
+def _numbers_in_text(text: str) -> list[str]:
+    return [m.group(0) for m in _NUMBER.finditer(text)]
+
+
+def _to_float(token: str) -> float | None:
+    try:
+        return abs(float(token.replace(",", "")))
+    except ValueError:
+        return None
+
+
+def _collect(obj, out: list) -> None:
+    """Every number inside a tool result: values, numbers in strings,
+    the length of every list (for counts like '9 products'), and
+    before-vs-after differences (for 'up 914 units')."""
+    if isinstance(obj, bool):
+        return
+    if isinstance(obj, (int, float)):
+        out.append(abs(float(obj)))
+    elif isinstance(obj, str):
+        out.extend(v for v in map(_to_float, _numbers_in_text(obj)) if v is not None)
+    elif isinstance(obj, dict):
+        for value in obj.values():
+            _collect(value, out)
+        # Differences between paired values: X_before / X_after ...
+        for key, value in obj.items():
+            if key.endswith("_before"):
+                other = obj.get(key[:-7] + "_after")
+                if isinstance(value, (int, float)) and isinstance(other, (int, float)):
+                    out.append(abs(float(other) - float(value)))
+        # ... and between paired dicts: summary_before/_after, old/new assumptions.
+        for a, b in [("summary_before", "summary_after"),
+                     ("current_assumptions", "scenario_assumptions"),
+                     ("previous_assumptions", "new_assumptions")]:
+            if isinstance(obj.get(a), dict) and isinstance(obj.get(b), dict):
+                for k, v in obj[a].items():
+                    w = obj[b].get(k)
+                    if isinstance(v, (int, float)) and isinstance(w, (int, float)):
+                        out.append(abs(float(w) - float(v)))
+    elif isinstance(obj, (list, tuple)):
+        out.append(float(len(obj)))
+        for value in obj:
+            _collect(value, out)
+
+
+def verify_numbers(text: str, tool_calls: list, question: str = "",
+                   earlier_tool_calls: list | None = None,
+                   product_names=()) -> dict | None:
+    """Check every number in an answer against the model's results.
+
+    Returns None if the answer contains no numbers, otherwise
+    {"checked": n, "unmatched": [...], "examples": [...]} where
+    "examples" are unmatched numbers the agent offered as suggestions
+    ("for example, 10 or 14 days"), not as results.
+    """
+    # Ignore product names ("7p Basic Shaftless") and list markers ("1. ").
+    clean = text
+    for name in sorted(product_names, key=len, reverse=True):
+        clean = re.sub(re.escape(name), " ", clean, flags=re.I)
+    clean = _LIST_MARKER.sub(" ", clean)
+    example_spans = [m.span() for m in _EXAMPLES.finditer(clean)]
+
+    stated = [(m.group(0), m.start()) for m in _NUMBER.finditer(clean)
+              if _to_float(m.group(0)) is not None]
+    if not stated:
+        return None
+
+    known: list[float] = []
+    for _, args, result in list(earlier_tool_calls or []) + list(tool_calls or []):
+        _collect(args, known)
+        _collect(result, known)
+    _collect(question, known)
+    known_set = set(round(v, 6) for v in known)
+
+    rounded: dict[int, set] = {}          # model values rounded like each stated number
+    unmatched, examples = [], []
+    for token, pos in stated:
+        value = _to_float(token)
+        decimals = len(token.split(".")[1]) if "." in token else 0
+        if decimals not in rounded:
+            rounded[decimals] = {round(k, decimals) for k in known_set}
+        if round(value, decimals) in rounded[decimals]:
+            continue
+        if any(a <= pos < b for a, b in example_spans):
+            examples.append(token)        # a suggested value, not a result
+        else:
+            unmatched.append(token)
+    return {"checked": len(stated) - len(examples), "unmatched": unmatched,
+            "examples": examples}
+
+
+# ======================================================================
 # 3. LLM AGENT (Google Gemini tool calling)
 # ======================================================================
 

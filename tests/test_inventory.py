@@ -169,3 +169,62 @@ def test_offline_finds_product_by_name(tools):
     reply = OfflineAssistant().ask("Why does Lucy blouse need replenishment?", [], tools)
     assert reply.tool_calls[0][0] == "get_product_details"
     assert "Lucy blouse" in reply.text and "Reorder" in reply.text
+
+
+# ---------------------------------------------------------------- 5. number check
+# Real Gemini answers from the live run-through on 2026-11-11.
+from agent import verify_numbers  # noqa: E402
+
+GEMINI_Q4 = ("If demand increases by 20%:\n\nReorders increase: 9 products need reordering (up from 8), "
+             "with Charlotte Unpadded Wire newly crossing its threshold.\nOrder quantities & ROPs: Reorder "
+             "points rise (e.g., Charlotte Unpadded Wire's ROP goes from 60 to 72 units), and total "
+             "recommended order units rise from 5,048 to 5,962 units.\nAnnual policy cost: Rises from "
+             "$22,246.17 to $24,369.44 due to larger order sizes.")
+GEMINI_Q5 = ("Brit Baby Tee needs replenishment because its current stock of 65 units has fallen right to "
+             "its reorder point of 65 units.\nDaily demand forecast (7-day SMA): 9.286 units/day\nLead time: "
+             "7 days\nReorder Point (ROP): 9.286 units/day × 7 days = 65 units\nRecommended Action: Place an "
+             "order for 412 units (the Economic Order Quantity).")
+
+
+def _calls(tools, spec):
+    return [(name, args, tools.call(name, args)) for name, args in spec]
+
+
+def test_real_gemini_answers_pass(tools, base):
+    names = list(base["Name"])
+    q4 = _calls(tools, [("run_what_if", {"demand_change_pct": 20})])
+    q5 = _calls(tools, [("get_product_details", {"product_id": "Brit Baby Tee"})])
+    r4 = verify_numbers(GEMINI_Q4, q4, "What if demand increases by 20%?", [], names)
+    r5 = verify_numbers(GEMINI_Q5, q5, "Why does Brit Baby Tee need replenishment?", [], names)
+    assert r4["unmatched"] == [] and r4["checked"] >= 9
+    assert r5["unmatched"] == [] and r5["checked"] >= 8
+
+
+def test_invented_numbers_are_caught(tools, base):
+    q5 = _calls(tools, [("get_product_details", {"product_id": "Brit Baby Tee"})])
+    r = verify_numbers("Order 950 units; it has 2.7 days of cover.", q5, "", [], list(base["Name"]))
+    assert r["unmatched"] == ["950", "2.7"]
+    # A number with no calculation behind it at all is caught too.
+    assert verify_numbers("Order 500 units.", [], "", [], [])["unmatched"] == ["500"]
+
+
+def test_check_allows_question_examples_and_differences(tools, base):
+    names = list(base["Name"])
+    q3 = _calls(tools, [("update_assumptions", {"lead_time_days": -5})])
+    r = verify_numbers("Lead time must be greater than 0 days, so -5 days is not valid "
+                       "(for example, 10 or 14 days).", q3, "Set lead time to -5 days", [], names)
+    assert r["unmatched"] == [] and r["examples"] == ["10", "14"]
+    q4 = _calls(tools, [("run_what_if", {"demand_change_pct": 20})])
+    assert verify_numbers("Units rise by 914.", q4, "", [], names)["unmatched"] == []  # 5,962 - 5,048
+    assert verify_numbers("1. **Lucy blouse** is urgent.", q4, "", [], names) is None  # list marker only
+
+
+def test_offline_demo_answers_pass(base):
+    tools = InventoryTools(base, m.DEFAULT_ASSUMPTIONS)
+    names, earlier = list(base["Name"]), []
+    for q in ["Which products should I prioritize?", "What if demand increases by 20%?",
+              "Why does Lucy blouse need replenishment?", "What if lead time is 14 days?"]:
+        reply = OfflineAssistant().ask(q, [], tools)
+        r = verify_numbers(reply.text, reply.tool_calls, q, earlier, names)
+        assert r and r["unmatched"] == [], (q, r)
+        earlier += reply.tool_calls

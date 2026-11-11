@@ -36,6 +36,7 @@ DEFAULT_MODEL = agent_module.DEFAULT_MODEL
 GeminiAgent = agent_module.GeminiAgent
 InventoryTools = agent_module.InventoryTools
 OfflineAssistant = agent_module.OfflineAssistant
+verify_numbers = agent_module.verify_numbers
 
 # ==========================================================
 # 1. PAGE CONFIGURATION
@@ -113,6 +114,12 @@ st.markdown("""
                  color: #555; margin: 0.6rem 0 0.2rem 0; }
     .stFormSubmitButton button[kind="primaryFormSubmit"] { background: #111; color: #fff; border-color: #111; }
     .stFormSubmitButton button[kind="primaryFormSubmit"]:hover { background: #d0021b; border-color: #d0021b; }
+
+    /* Number check under each answer */
+    .verify { font-size: 0.78rem; padding: 3px 8px; margin: 4px 0 2px 0; display: inline-block;
+              border: 1px solid; line-height: 1.4; }
+    .verify-ok { color: #1d6b3a; background: #e7f6ec; border-color: #1d6b3a; }
+    .verify-warn { color: #8a5a00; background: #fff4e0; border-color: #8a5a00; }
 
     /* Header band */
     .hero { background: #111; color: #fff; padding: 22px 28px; margin-bottom: 18px;
@@ -634,6 +641,23 @@ with chat_col:
                         for name, args, result in msg["tool_calls"]:
                             st.markdown(f"**{name}**(`{args}`)")
                             st.json(result, expanded=False)
+                # Proof that the AI did not invent numbers (see agent.verify_numbers).
+                check = msg.get("check")
+                if check:
+                    n = check["checked"]
+                    if not check["unmatched"]:
+                        label = (f"✓ Numbers checked: all {n} come from the model's calculations"
+                                 if n else "✓ No calculated numbers in this answer")
+                        if check.get("examples"):
+                            label += f" ({', '.join(check['examples'])} were suggested examples)"
+                        st.markdown(f'<span class="verify verify-ok">{label}</span>',
+                                    unsafe_allow_html=True)
+                    else:
+                        bad = ", ".join(check["unmatched"])
+                        st.markdown(
+                            f'<span class="verify verify-warn">Check: {len(check["unmatched"])} of {n} '
+                            f"numbers were not found in the model's calculations ({bad})</span>",
+                            unsafe_allow_html=True)
                 if msg.get("note"):
                     st.caption(msg["note"])
 
@@ -683,10 +707,17 @@ with chat_col:
         # If the agent changed the assumptions, the dashboard follows.
         st.session_state.assumptions = tools.assumptions
 
+        # Check every number in the answer against the model's results
+        # (this answer's tool calls plus earlier ones in the conversation).
+        earlier = [c for m in st.session_state.messages for c in m.get("tool_calls", [])]
+        check = verify_numbers(reply.text, reply.tool_calls, question, earlier,
+                               product_names=list(base_df["Name"]))
+
         st.session_state.messages.append({
             "role": "assistant",
             "content": reply.text,
             "tool_calls": reply.tool_calls,
+            "check": check,
             "note": note,
         })
         st.rerun()
