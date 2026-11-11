@@ -204,6 +204,11 @@ GREETING = (
 )
 if "messages" not in st.session_state:
     st.session_state.messages = [{"role": "assistant", "content": GREETING}]
+# Keep the greeting current if the app was updated while this chat was open.
+if (st.session_state.messages and st.session_state.messages[0]["role"] == "assistant"
+        and st.session_state.messages[0]["content"] != GREETING
+        and st.session_state.messages[0]["content"].startswith("Hello! I'm")):
+    st.session_state.messages[0] = {"role": "assistant", "content": GREETING}
 
 
 def get_secret(name):
