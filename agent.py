@@ -161,7 +161,7 @@ class InventoryTools:
         })
         return details
 
-    def prioritize_reorders(self, limit: int = 5) -> dict:
+    def prioritize_reorders(self, limit: int = 3) -> dict:
         try:
             limit = int(limit)
         except (TypeError, ValueError):
@@ -305,7 +305,7 @@ TOOL_SPECS = [
     {"name": "prioritize_reorders",
      "description": "Rank products needing reorder by urgency (fewest days of stock left first).",
      "parameters": {"type": "object", "properties": {
-         "limit": {"type": "integer", "description": "How many to return (default 5)."}}}},
+         "limit": {"type": "integer", "description": "How many to return. Use 3 unless the user asks for a different number."}}}},
     {"name": "run_what_if",
      "description": "Hypothetical scenario: recompute the plan with changed inputs and compare with the current plan. Does not change the dashboard.",
      "parameters": {"type": "object", "properties": {
@@ -351,6 +351,7 @@ STRICT RULES
 7. Be SHORT: you answer in a NARROW chat panel, usually in under 8 lines.
    - Lists: ONE line per product with only the 1-2 numbers that matter for the question,
      e.g. "1. **Lucy blouse**: 4.1 days of stock left, order 891 units". No sub-bullets.
+   - "Which products should I prioritize?" -> the top 3 only, unless the user asks for more.
    - Give the full calculation only when the user asks "why" or "how" about one product.
    - Answer ONLY what was asked. No extra summary, no follow-up offers or questions,
      no "Recommended Action" line unless the user asks what to do.
@@ -629,7 +630,7 @@ class OfflineAssistant:
             )
 
         if any(w in q for w in ["priorit", "urgent", "first", "most critical"]):
-            res = call("prioritize_reorders", limit=5)
+            res = call("prioritize_reorders", limit=3)
             lines = "\n".join(
                 f"{r['rank']}. **{r['name']}**: {r['days_of_cover']} days of cover, "
                 f"{r['units_below_reorder_point']} units below ROP, order {r['recommended_order_units']}"
