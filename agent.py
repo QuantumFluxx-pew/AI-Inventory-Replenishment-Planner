@@ -348,7 +348,9 @@ STRICT RULES
 6. If the user asks about data or limitations, be honest: stock levels are simulated, costs
    and lead time are assumptions, and SMA forecasts can lag sudden demand changes.
    Do not add these caveats to answers that did not ask about them.
-7. Be SHORT: you answer in a NARROW chat panel, usually in under 8 lines.
+7. Be SHORT: you answer in a NARROW chat panel, usually in under 8 lines,
+   but ALWAYS answer in at least one full sentence with the number(s) asked for,
+   e.g. "You have 3,346 units in stock across 18 products."
    - Lists: ONE line per product with only the 1-2 numbers that matter for the question,
      e.g. "1. **Lucy blouse**: 4.1 days of stock left, order 891 units". No sub-bullets.
    - "Which products should I prioritize?" -> the top 3 only, unless the user asks for more.
@@ -523,14 +525,25 @@ class GeminiAgent:
         contents.append(t.Content(role="user", parts=[t.Part(text=question)]))
 
         log = []
+        retried_empty = False
         for _ in range(MAX_TOOL_ROUNDS):
             response = self.client.models.generate_content(
                 model=self.model_name, contents=contents, config=self.config
             )
             calls = response.function_calls or []
             if not calls:
-                return AgentReply(text=(response.text or "").strip() or
-                                  "Sorry, I couldn't produce an answer. Please rephrase.",
+                text = (response.text or "").strip()
+                if re.search(r"[A-Za-z0-9]", text):
+                    return AgentReply(text=text, mode="llm", tool_calls=log)
+                # Empty or junk reply (e.g. just "-"): ask the model once more for words.
+                if not retried_empty:
+                    retried_empty = True
+                    contents.append(response.candidates[0].content)
+                    contents.append(t.Content(role="user", parts=[t.Part(
+                        text="Please answer my question above in one or two plain sentences, "
+                             "using only numbers from the tool results.")]))
+                    continue
+                return AgentReply(text="Sorry, I couldn't produce an answer. Please rephrase.",
                                   mode="llm", tool_calls=log)
 
             # Keep the model's turn exactly as returned (includes any thought

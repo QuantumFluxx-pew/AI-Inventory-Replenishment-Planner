@@ -228,3 +228,39 @@ def test_offline_demo_answers_pass(base):
         r = verify_numbers(reply.text, reply.tool_calls, q, earlier, names)
         assert r and r["unmatched"] == [], (q, r)
         earlier += reply.tool_calls
+
+
+def test_agent_retries_empty_reply(tools):
+    """If Gemini answers with no words (e.g. just "-"), the agent asks once more."""
+    from google.genai import types
+    from agent import GeminiAgent
+
+    class Resp:
+        def __init__(self, parts):
+            self.candidates = [types.Candidate(content=types.Content(role="model", parts=parts))]
+
+        @property
+        def function_calls(self):
+            return [p.function_call for p in self.candidates[0].content.parts if p.function_call] or None
+
+        @property
+        def text(self):
+            return "".join(p.text or "" for p in self.candidates[0].content.parts)
+
+    script = [[types.Part(function_call=types.FunctionCall(name="get_inventory_summary", args={}))],
+              [types.Part(text="-")],
+              [types.Part(text="You have 3,346 units in stock across 18 products.")]]
+
+    class Models:
+        calls = 0
+
+        def generate_content(self, model, contents, config):
+            Models.calls += 1
+            return Resp(script[Models.calls - 1])
+
+    class Client:
+        models = Models()
+
+    reply = GeminiAgent("test-key", client=Client()).ask("how many units available?", [], tools)
+    assert reply.text.startswith("You have 3,346 units")
+    assert Models.calls == 3
