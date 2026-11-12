@@ -3,7 +3,6 @@
 An agentic AI assistant that helps a store manager decide **what to reorder, how much, and when**. It uses one year of real H&M daily sales, with real product names and photos.
 
 **Live app:** https://ai-inventory-replenishment-planner-4dtk2bp4nqeuo73l8pqlan.streamlit.app/
-**Slides (Milestone 2):** [presentation/Milestone2_Slides.pdf](presentation/Milestone2_Slides.pdf)
 **Notebook:** [Open in Colab](https://colab.research.google.com/github/QuantumFluxx-pew/AI-Inventory-Replenishment-Planner/blob/main/notebooks/AI_Inventory_Replenishment_Planner_HM.ipynb)
 
 ## What it does
@@ -76,7 +75,6 @@ The agent **asks for missing inputs** ("increase demand by how much?") instead o
 | `kaggle/hm_select_products.py` | Step 1: runs on Kaggle to pick steady products from 31M purchases |
 | `prepare_data.py` | Step 2: cleans the Kaggle output into `data/` and `images/` |
 | `notebooks/…HM.ipynb` | Colab notebook: the full model walk-through with tests |
-| `presentation/Milestone2_Slides.pdf` | Milestone 2 presentation slides |
 | `tests/test_inventory.py` | 30 automated tests |
 | `.streamlit/config.toml` | Forces the light theme |
 
