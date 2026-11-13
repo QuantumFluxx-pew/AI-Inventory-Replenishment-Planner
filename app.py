@@ -91,7 +91,8 @@ st.markdown("""
     [data-testid="stChatMessageContent"] { background: #fff; border: 1px solid #e5e5e5;
                                            padding: 10px 14px; min-width: 0; overflow-wrap: anywhere; }
     /* Wide answers (tables) scroll inside their own bubble, never the whole chat. */
-    .st-key-advisor_chat { overflow-x: hidden !important; }   /* one scroll: the chat box only */
+    .st-key-advisor_chat { overflow-x: hidden !important; }
+.settings-changed { font-size: 0.95rem; color: #4A4A47; margin: 0.25rem 0 0.75rem; }   /* one scroll: the chat box only */
     [data-testid="stChatMessageContent"] table { display: block; max-width: 100%; overflow-x: auto;
                                                  font-size: 0.85rem; }
     [data-testid="stChatMessageContent"] th, [data-testid="stChatMessageContent"] td {
@@ -587,22 +588,42 @@ with dashboard_col:
         # of Recalculate is visible without scrolling back up.
         st.markdown("**Results with these settings** (all 18 products)")
         all_summary = model.summarize(plan)
+        modified = assumptions != model.DEFAULT_ASSUMPTIONS
+        if modified:
+            # Only the settings that differ from the defaults, as "old → new".
+            d = model.DEFAULT_ASSUMPTIONS
+            fields = [
+                ("Ordering cost", d.ordering_cost, assumptions.ordering_cost, "${:g}"),
+                ("Holding cost", d.holding_cost, assumptions.holding_cost, "${:g}"),
+                ("Lead time", d.lead_time_days, assumptions.lead_time_days, "{:g} days"),
+                ("Demand change", d.demand_change_pct, assumptions.demand_change_pct, "{:+g}%"),
+                ("Safety stock", d.service_level, assumptions.service_level, "{:g}%"),
+                ("Forecast window", d.sma_window, assumptions.sma_window, "{:g} days"),
+            ]
+            changes = [f"{name} <b>{fmt.format(old)} → {fmt.format(new)}</b>"
+                       for name, old, new, fmt in fields if old != new]
+            st.markdown(
+                '<p class="settings-changed">Changed from default: '
+                + " &nbsp;·&nbsp; ".join(changes) + "</p>",
+                unsafe_allow_html=True)
+            base_summary = model.summarize(model.calculate_plan(base_df, d))
+
+        def _delta(key):
+            # Difference from the default results, shown under each number.
+            if not modified:
+                return None
+            diff = all_summary[key] - base_summary[key]
+            return f"{diff:+,} vs. default" if diff else "same as default"
+
         r1, r2, r3 = st.columns(3)
-        r1.metric("Need Reorder", all_summary["need_reorder"])
-        r2.metric("Sufficient Stock", all_summary["sufficient_stock"])
-        r3.metric("Units to Order", f"{all_summary['recommended_order_units']:,}")
-        if assumptions != model.DEFAULT_ASSUMPTIONS:
-            default_summary = model.summarize(model.calculate_plan(base_df, model.DEFAULT_ASSUMPTIONS))
-            st.info(
-                "Showing results for **modified assumptions**: "
-                f"S = ${assumptions.ordering_cost:g}, H = ${assumptions.holding_cost:g}, "
-                f"lead time = {assumptions.lead_time_days:g} days, "
-                f"demand change = {assumptions.demand_change_pct:+g}%, "
-                f"service level = {assumptions.service_level:g}%, "
-                f"forecast window = {assumptions.sma_window} days. "
-                f"With the default settings: {default_summary['need_reorder']} products to reorder, "
-                f"{default_summary['recommended_order_units']:,} units. "
-                "Use *Reset to defaults* to return to the baseline.")
+        r1.metric("Need Reorder", all_summary["need_reorder"],
+                  delta=_delta("need_reorder"), delta_color="off")
+        r2.metric("Sufficient Stock", all_summary["sufficient_stock"],
+                  delta=_delta("sufficient_stock"), delta_color="off")
+        r3.metric("Units to Order", f"{all_summary['recommended_order_units']:,}",
+                  delta=_delta("recommended_order_units"), delta_color="off")
+        if modified:
+            st.caption("Click **Reset to defaults** to go back to the baseline.")
         to_order = plan[plan["Status"] == "Reorder"].sort_values("Days_of_Cover")
         if to_order.empty:
             st.success("No product needs reordering with these settings.")
