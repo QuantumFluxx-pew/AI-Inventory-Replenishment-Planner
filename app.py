@@ -313,17 +313,19 @@ def days_of_cover_chart(data, lead_time):
 def order_quantity_chart(data):
     """Recommended order units, largest first, with the value at each bar end."""
     top = data[data["Order_Quantity"] > 0].nlargest(10, "Order_Quantity")
+    # Leave ~15% room past the longest bar so its value label is never cut off.
+    x_max = float(top["Order_Quantity"].max() or 1) * 1.15
     base = alt.Chart(top).encode(
         y=alt.Y("Name:N", sort="-x", title=None, axis=alt.Axis(labelOverlap=False)))
     bars = base.mark_bar(color=ORDER_BLUE, cornerRadiusEnd=4,
                          height={"band": 0.7}).encode(
         x=alt.X("Order_Quantity:Q", title="Units to order (EOQ)",
-                axis=alt.Axis(tickCount=6)),
+                scale=alt.Scale(domain=[0, x_max]), axis=alt.Axis(tickCount=6)),
         tooltip=[alt.Tooltip("Name", title="Product"), alt.Tooltip("Product_ID", title="H&M article ID"),
                  alt.Tooltip("Order_Quantity", title="Units to order")],
     )
     values = base.mark_text(align="left", dx=4, color="#202b43", fontSize=12).encode(
-        x="Order_Quantity:Q", text="Order_Quantity:Q")
+        x="Order_Quantity:Q", text=alt.Text("Order_Quantity:Q", format=","))
     return _style(bars + values, height=max(120, 28 * len(top)))
 
 
