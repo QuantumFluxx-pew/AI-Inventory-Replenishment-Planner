@@ -593,6 +593,35 @@ with dashboard_col:
             st.session_state.assumptions = model.DEFAULT_ASSUMPTIONS
             st.rerun()
 
+        # Results for the current settings, right under the form, so the effect
+        # of Recalculate is visible without scrolling back up.
+        st.markdown("**Results with these settings** (all 18 products)")
+        all_summary = model.summarize(plan)
+        r1, r2, r3 = st.columns(3)
+        r1.metric("Need Reorder", all_summary["need_reorder"])
+        r2.metric("Sufficient Stock", all_summary["sufficient_stock"])
+        r3.metric("Units to Order", f"{all_summary['recommended_order_units']:,}")
+        if assumptions != model.DEFAULT_ASSUMPTIONS:
+            default_summary = model.summarize(model.calculate_plan(base_df, model.DEFAULT_ASSUMPTIONS))
+            st.caption(
+                f"With the default settings: {default_summary['need_reorder']} products to reorder, "
+                f"{default_summary['recommended_order_units']:,} units.")
+        to_order = plan[plan["Status"] == "Reorder"].sort_values("Days_of_Cover")
+        if to_order.empty:
+            st.success("No product needs reordering with these settings.")
+        else:
+            st.dataframe(
+                to_order[["Name", "Days_of_Cover", "Current_Stock", "ROP", "Order_Quantity"]],
+                hide_index=True, width="stretch",
+                column_config={
+                    "Name": "Product to reorder",
+                    "Days_of_Cover": st.column_config.NumberColumn("Days of stock left", format="%.1f"),
+                    "Current_Stock": "Stock",
+                    "ROP": "Reorder point",
+                    "Order_Quantity": st.column_config.NumberColumn("Order (EOQ)", format="%d"),
+                },
+            )
+
     st.caption(
         f"Data: H&M sales (Kaggle), {sales_df.index.min():%b %Y} to {sales_df.index.max():%b %Y} · "
         "Stock is simulated · Not affiliated with H&M"
