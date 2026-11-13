@@ -636,7 +636,7 @@ with dashboard_col:
                     "Days_of_Cover": st.column_config.NumberColumn("Days of stock left", format="%.1f"),
                     "Current_Stock": "Stock",
                     "ROP": "Reorder point",
-                    "Order_Quantity": st.column_config.NumberColumn("Order (EOQ)", format="%d"),
+                    "Order_Quantity": st.column_config.NumberColumn("Order (EOQ)", format="localized"),
                 },
             )
 
