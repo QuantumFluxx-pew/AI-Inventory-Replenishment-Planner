@@ -401,8 +401,9 @@ with dashboard_col:
     k3.metric("Sufficient Stock", summary["sufficient_stock"])
     k4.metric("Units to Order", f"{summary['recommended_order_units']:,}")
 
+    # A key keeps the open tab across reruns, so Recalculate stays on Settings.
     tab_overview, tab_products, tab_details, tab_settings = st.tabs(
-        ["Overview", "Products", "Product Details", "Settings"])
+        ["Overview", "Products", "Product Details", "Settings"], key="main_tabs", on_change="rerun")
 
     # ------------------------------------------------------
     # 5b. OVERVIEW TAB: charts
