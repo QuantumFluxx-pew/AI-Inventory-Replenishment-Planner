@@ -355,17 +355,6 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-if assumptions != model.DEFAULT_ASSUMPTIONS:
-    st.info(
-        "Showing results for **modified assumptions**: "
-        f"S = ${assumptions.ordering_cost:g}, H = ${assumptions.holding_cost:g}, "
-        f"lead time = {assumptions.lead_time_days:g} days, "
-        f"demand change = {assumptions.demand_change_pct:+g}%, "
-        f"service level = {assumptions.service_level:g}%, "
-        f"forecast window = {assumptions.sma_window} days. "
-        "Use *Reset to defaults* to return to the baseline."
-    )
-
 dashboard_col, chat_col = st.columns([1.8, 1], gap="large")
 
 # ==========================================================
@@ -604,9 +593,16 @@ with dashboard_col:
         r3.metric("Units to Order", f"{all_summary['recommended_order_units']:,}")
         if assumptions != model.DEFAULT_ASSUMPTIONS:
             default_summary = model.summarize(model.calculate_plan(base_df, model.DEFAULT_ASSUMPTIONS))
-            st.caption(
+            st.info(
+                "Showing results for **modified assumptions**: "
+                f"S = ${assumptions.ordering_cost:g}, H = ${assumptions.holding_cost:g}, "
+                f"lead time = {assumptions.lead_time_days:g} days, "
+                f"demand change = {assumptions.demand_change_pct:+g}%, "
+                f"service level = {assumptions.service_level:g}%, "
+                f"forecast window = {assumptions.sma_window} days. "
                 f"With the default settings: {default_summary['need_reorder']} products to reorder, "
-                f"{default_summary['recommended_order_units']:,} units.")
+                f"{default_summary['recommended_order_units']:,} units. "
+                "Use *Reset to defaults* to return to the baseline.")
         to_order = plan[plan["Status"] == "Reorder"].sort_values("Days_of_Cover")
         if to_order.empty:
             st.success("No product needs reordering with these settings.")
