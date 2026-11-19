@@ -695,7 +695,9 @@ with dashboard_col:
             diff = all_summary[key] - base_summary[key]
             return f"{diff:+,} vs. default" if diff else "same as default"
 
-        r1, r2, r3, r4 = st.columns(4)
+        # Two rows of two, so the dollar amount is never cut off.
+        r1, r2 = st.columns(2)
+        r3, r4 = st.columns(2)
         r1.metric("Need Reorder", all_summary["need_reorder"],
                   delta=_delta("need_reorder"), delta_color="off")
         r2.metric("Sufficient Stock", all_summary["sufficient_stock"],
