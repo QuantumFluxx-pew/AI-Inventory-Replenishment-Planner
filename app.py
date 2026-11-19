@@ -734,7 +734,7 @@ with dashboard_col:
         if USING_SAMPLE:
             st.caption(
                 "1. Download the templates and fill them in with your store's data "
-                "(or use them as they are to try the feature). "
+                "(or use them as they are to try the feature).\n"
                 "2. Upload them below and click **Use this data**.")
             f1, f2 = st.columns(2)
             with f1:
