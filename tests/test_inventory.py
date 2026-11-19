@@ -369,3 +369,35 @@ def test_upload_rejects_missing_stock_rows():
     sales, stock = _example()
     with pytest.raises(m.InputError, match="no stock for"):
         m.prepare_uploaded_data(sales, stock.iloc[:3])
+
+
+def test_agent_retries_when_gemini_is_busy(tools):
+    """A brief 503 'model overloaded' error is retried instead of failing."""
+    from google.genai import types
+    from agent import GeminiAgent
+
+    class Busy(Exception):
+        code = 503
+
+    class Resp:
+        candidates = [types.Candidate(content=types.Content(role="model",
+                      parts=[types.Part(text="You have 3,346 units in stock across 18 products.")]))]
+        function_calls = None
+        text = "You have 3,346 units in stock across 18 products."
+
+    class Models:
+        calls = 0
+
+        def generate_content(self, model, contents, config):
+            Models.calls += 1
+            if Models.calls == 1:
+                raise Busy("503 UNAVAILABLE")
+            return Resp()
+
+    class Client:
+        models = Models()
+
+    agent = GeminiAgent("test-key", client=Client())
+    agent.retry_waits = (0, 0)   # no real waiting in tests
+    reply = agent.ask("how many units available?", [], tools)
+    assert reply.text.startswith("You have 3,346") and Models.calls == 2

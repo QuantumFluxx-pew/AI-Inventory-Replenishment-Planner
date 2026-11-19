@@ -906,8 +906,10 @@ with chat_col:
         # Check every number in the answer against the model's results
         # (this answer's tool calls plus earlier ones in the conversation).
         earlier = [c for m in st.session_state.messages for c in m.get("tool_calls", [])]
-        check = verify_numbers(reply.text, reply.tool_calls, question, earlier,
-                               product_names=list(base_df["Name"]))
+        # (Offline help text with no tool calls only lists example questions.)
+        check = (verify_numbers(reply.text, reply.tool_calls, question, earlier,
+                                product_names=list(base_df["Name"]))
+                 if reply.tool_calls or reply.mode == "llm" else None)
 
         st.session_state.messages.append({
             "role": "assistant",

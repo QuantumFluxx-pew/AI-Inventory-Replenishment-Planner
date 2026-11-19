@@ -564,6 +564,24 @@ class GeminiAgent:
             automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
         )
 
+    retry_waits = (2, 5)   # seconds to wait before each retry of a busy request
+
+    def _generate(self, contents):
+        """One Gemini request. "Busy" errors (429 / 5xx) are usually brief,
+        so wait and try again up to len(waits) times before giving up."""
+        import time
+        waits = self.retry_waits
+        for attempt in range(len(waits) + 1):
+            try:
+                return self.client.models.generate_content(
+                    model=self.model_name, contents=contents, config=self.config)
+            except Exception as err:
+                code = getattr(err, "code", None) or getattr(err, "status_code", None)
+                busy = code in (429, 500, 502, 503, 504) or "UNAVAILABLE" in str(err)
+                if not busy or attempt == len(waits):
+                    raise
+                time.sleep(waits[attempt])
+
     def ask(self, question: str, history: list[dict], tools: InventoryTools) -> AgentReply:
         t = self.types
         recent = list(history[-HISTORY_TURNS:])
@@ -581,9 +599,7 @@ class GeminiAgent:
         log = []
         retried_empty = False
         for _ in range(MAX_TOOL_ROUNDS):
-            response = self.client.models.generate_content(
-                model=self.model_name, contents=contents, config=self.config
-            )
+            response = self._generate(contents)
             calls = response.function_calls or []
             if not calls:
                 text = (response.text or "").strip()

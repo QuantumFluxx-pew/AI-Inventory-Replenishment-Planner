@@ -82,7 +82,7 @@ The agent **asks for missing inputs** ("increase demand by how much?") instead o
 | `prepare_data.py` | Step 2: cleans the Kaggle output into `data/` and `images/` |
 | `notebooks/…HM.ipynb` | Colab notebook: the full model walk-through with tests |
 | `data/example_upload/` | Example sales and stock files for the upload feature |
-| `tests/test_inventory.py` | 44 automated tests |
+| `tests/test_inventory.py` | 45 automated tests |
 | `.streamlit/config.toml` | Forces the light theme |
 
 ## Run it on your computer
