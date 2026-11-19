@@ -76,9 +76,12 @@ class InventoryTools:
     """Holds the product data and the current assumptions, and exposes the
     functions the agent may call. Each method returns a JSON-safe dict."""
 
-    def __init__(self, base: pd.DataFrame, assumptions: model.Assumptions):
+    def __init__(self, base: pd.DataFrame, assumptions: model.Assumptions,
+                 data_note: str | None = None):
         self.base = base
         self.assumptions = assumptions
+        # None = the built-in H&M sample; otherwise a note about uploaded data.
+        self.data_note = data_note
 
     # -- helpers --------------------------------------------------------
     @property
@@ -87,6 +90,12 @@ class InventoryTools:
 
     def _assumption_notes(self, a: model.Assumptions | None = None) -> dict:
         a = a or self.assumptions
+        if self.data_note:
+            return {**a.to_dict(), "notes": (
+                f"{self.data_note} Ordering cost, holding cost and lead time are assumptions "
+                "the user can change. Demand forecast model: "
+                f"{model.FORECAST_MODEL_NAMES[a.forecast_model]} "
+                f"(moving-average window {a.sma_window} days).")}
         return {
             **a.to_dict(),
             "notes": (
@@ -348,6 +357,18 @@ TOOL_SPECS = [
 ]
 
 
+def system_prompt(data_note: str | None = None) -> str:
+    """The system prompt, with the dataset description swapped when the user
+    has uploaded their own data."""
+    if not data_note:
+        return SYSTEM_PROMPT
+    head, rest = SYSTEM_PROMPT.split("\n\nYour models", 1)
+    return ("You are Stock Pilot, an AI inventory agent that helps a store manager with replenishment.\n"
+            f"DATA: {data_note} Ignore any H&M product names; use only the products in the tool results.\n"
+            "Users may refer to products by name or part of a name; pass their words to the tools."
+            "\n\nYour models" + rest)
+
+
 SYSTEM_PROMPT = """You are Stock Pilot, an AI inventory agent that helps a store manager with replenishment.
 You work with 18 steady-selling H&M clothing products (real product names, e.g.
 "Brit Baby Tee", "Pluto RW slacks (1)"), using one year of real H&M daily sales
@@ -521,7 +542,8 @@ def verify_numbers(text: str, tool_calls: list, question: str = "",
 class GeminiAgent:
     """Runs the tool-calling loop with Google Gemini."""
 
-    def __init__(self, api_key: str, model_name: str = DEFAULT_MODEL, client=None):
+    def __init__(self, api_key: str, model_name: str = DEFAULT_MODEL, client=None,
+                 data_note: str | None = None):
         from google.genai import types  # imported here so offline mode needs no SDK
         self.types = types
         if client is None:
@@ -530,7 +552,7 @@ class GeminiAgent:
         self.client = client
         self.model_name = model_name
         self.config = types.GenerateContentConfig(
-            system_instruction=SYSTEM_PROMPT,
+            system_instruction=system_prompt(data_note),
             temperature=0.2,
             tools=[types.Tool(function_declarations=[
                 types.FunctionDeclaration(

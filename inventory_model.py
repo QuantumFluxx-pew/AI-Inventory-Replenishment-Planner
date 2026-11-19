@@ -345,7 +345,16 @@ def load_base_data(products_path: str = PRODUCTS_CSV,
     if products["Product_ID"].duplicated().any():
         raise InputError("Each Product_ID must appear only once in products.csv.")
 
-    sales = load_sales(sales_path)
+    return add_forecasts(products, load_sales(sales_path))
+
+
+def add_forecasts(products: pd.DataFrame, sales: pd.DataFrame) -> pd.DataFrame:
+    """Add both forecast models (and their accuracy) to the product table.
+
+    `sales` is the wide daily table (one row per day, one column per
+    Product_ID). Used for the H&M sample data and for uploaded data.
+    """
+    products = products.copy()
     no_sales = [p for p in products["Product_ID"] if p not in sales.columns]
     if no_sales:
         raise InputError("No sales history for: " + ", ".join(no_sales))
@@ -371,6 +380,111 @@ def load_base_data(products_path: str = PRODUCTS_CSV,
         for w in ALLOWED_SMA_WINDOWS:
             products.at[i, f"HOLD_SMA_{w}"] = _mae(y, sma_backtest(y, w).to_numpy(), split)
     return products
+
+
+# ----------------------------------------------------------------------
+# 4b. USER-UPLOADED DATA
+# ----------------------------------------------------------------------
+
+MIN_UPLOAD_DAYS = 60          # enough for a 28-day window, warm-up and hold-out
+MAX_UPLOAD_PRODUCTS = 200
+ESTIMATED_STOCK_DAYS = 10     # if no stock file: stock = 10 days of recent sales
+
+
+def _find_column(frame: pd.DataFrame, options, what: str, file: str) -> str:
+    lookup = {str(c).strip().lower(): c for c in frame.columns}
+    for option in options:
+        if option in lookup:
+            return lookup[option]
+    raise InputError(f"The {file} needs a '{options[0]}' column ({what}). "
+                     f"Columns found: {', '.join(map(str, frame.columns))}.")
+
+
+def prepare_uploaded_data(sales_raw: pd.DataFrame, stock_raw: pd.DataFrame | None = None):
+    """Check and convert a user's own data into the model's format.
+
+    sales_raw: one row per product per day, with columns date, product, units
+               (other names accepted: day; item / product_id / sku / name;
+               quantity / qty / sales).
+    stock_raw: optional, columns product, current_stock (or stock / on_hand).
+               Without it, stock is estimated as 10 days of recent sales.
+
+    Returns (products, sales_wide, notes). Raises InputError with a plain
+    message for anything that would make the results wrong.
+    """
+    file = "sales file"
+    date_col = _find_column(sales_raw, ["date", "day"], "the day of the sale", file)
+    prod_col = _find_column(sales_raw, ["product", "item", "product_id", "sku", "name"],
+                            "the product name or ID", file)
+    unit_col = _find_column(sales_raw, ["units", "quantity", "qty", "sales"],
+                            "units sold that day", file)
+
+    sales = pd.DataFrame({
+        "date": pd.to_datetime(sales_raw[date_col], errors="coerce"),
+        "product": sales_raw[prod_col].astype(str).str.strip(),
+        "units": pd.to_numeric(sales_raw[unit_col], errors="coerce"),
+    })
+    problems = []
+    if sales["date"].isna().any():
+        problems.append(f"{int(sales['date'].isna().sum())} rows have a date that could not be read "
+                        "(use YYYY-MM-DD).")
+    if sales["units"].isna().any():
+        problems.append(f"{int(sales['units'].isna().sum())} rows have units that are not a number.")
+    if (sales["units"] < 0).any():
+        problems.append(f"{int((sales['units'] < 0).sum())} rows have negative units.")
+    if (sales["product"] == "").any() or sales["product"].isin(["nan", "None"]).any():
+        problems.append("Some rows have no product name.")
+    if problems:
+        raise InputError("Please fix the sales file: " + " ".join(problems))
+
+    wide = (sales.pivot_table(index="date", columns="product", values="units", aggfunc="sum")
+            .asfreq("D").fillna(0))
+    notes = []
+    if len(wide) < MIN_UPLOAD_DAYS:
+        raise InputError(f"The sales file covers {len(wide)} days; at least {MIN_UPLOAD_DAYS} "
+                         "days are needed to forecast and test accuracy.")
+    if wide.shape[1] > MAX_UPLOAD_PRODUCTS:
+        raise InputError(f"The sales file has {wide.shape[1]} products; the limit is "
+                         f"{MAX_UPLOAD_PRODUCTS}.")
+    missing_days = int(sales.groupby("date").size().reindex(wide.index).isna().sum())
+    if missing_days:
+        notes.append(f"{missing_days} days had no rows at all and were counted as zero sales.")
+    never = [p for p in wide.columns if wide[p].tail(28).sum() == 0]
+    if never:
+        notes.append("No sales in the last 28 days, so no reorder is suggested for: "
+                     + ", ".join(never[:5]) + ("…" if len(never) > 5 else "") + ".")
+
+    products = pd.DataFrame({"Product_ID": wide.columns, "Name": wide.columns})
+    products["Product_Type"] = "Uploaded"
+    products["Colour"] = ""
+    products["Department"] = ""
+    products["Description"] = ""
+
+    if stock_raw is not None:
+        file = "stock file"
+        sp = _find_column(stock_raw, ["product", "item", "product_id", "sku", "name"],
+                          "the product name or ID", file)
+        sq = _find_column(stock_raw, ["current_stock", "stock", "on_hand", "inventory"],
+                          "units in stock now", file)
+        stock = pd.Series(pd.to_numeric(stock_raw[sq], errors="coerce").values,
+                          index=stock_raw[sp].astype(str).str.strip())
+        if stock.isna().any() or (stock < 0).any():
+            raise InputError("Please fix the stock file: every stock value must be a number, 0 or more.")
+        missing = [p for p in wide.columns if p not in stock.index]
+        if missing:
+            raise InputError("The stock file has no stock for: " + ", ".join(missing[:5])
+                             + ("…" if len(missing) > 5 else "") + ".")
+        extra = [p for p in stock.index if p not in wide.columns]
+        if extra:
+            notes.append("Ignored stock for products with no sales: " + ", ".join(extra[:5]) + ".")
+        products["Current_Stock"] = products["Product_ID"].map(stock).astype(float)
+    else:
+        recent = wide.tail(7).mean()
+        products["Current_Stock"] = np.round(products["Product_ID"].map(recent) * ESTIMATED_STOCK_DAYS)
+        notes.append(f"No stock file: stock was estimated as {ESTIMATED_STOCK_DAYS} days of recent "
+                     "sales for every product. Upload a stock file for real recommendations.")
+
+    return add_forecasts(products, wide), wide, notes
 
 
 # ----------------------------------------------------------------------

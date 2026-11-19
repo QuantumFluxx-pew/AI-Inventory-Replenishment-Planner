@@ -203,14 +203,47 @@ except Exception as error:
     st.code(str(error))
     st.stop()
 
+# Example upload files (also in data/example_upload/), offered for download.
+def _read_example(name):
+    try:
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                               "data", "example_upload", name), "rb") as f:
+            return f.read()
+    except OSError:
+        return b""
+
+
+SAMPLE_SALES_CSV = _read_example("example_sales.csv")
+SAMPLE_STOCK_CSV = _read_example("example_stock.csv")
+
+# The user may replace the H&M sample with their own sales (Settings tab).
+custom = st.session_state.get("custom_data")
+if custom and custom.get("version") != model.MODEL_VERSION:
+    custom = st.session_state.custom_data = None   # uploaded under an older app version
+USING_SAMPLE = not custom
+if custom:
+    base_df, sales_df = custom["base"], custom["sales"]
+    DATA_NOTE = (f"The user uploaded their own data ({custom['label']}): "
+                 f"{len(base_df)} products, daily sales from {sales_df.index.min():%Y-%m-%d} "
+                 f"to {sales_df.index.max():%Y-%m-%d}. " + custom["stock_note"])
+else:
+    DATA_NOTE = None
+ID_LABEL = "H&M article ID" if USING_SAMPLE else "Product ID"
+N_PRODUCTS = len(base_df)
+
 # Current model inputs. Shared by the dashboard and the chatbot.
 # Reset them if they come from an older version of the app.
 if not isinstance(st.session_state.get("assumptions"), model.Assumptions):
     st.session_state.assumptions = model.DEFAULT_ASSUMPTIONS
 
+if USING_SAMPLE:
+    _who = ("for 18 H&M products, from basics like the *Brit Baby Tee* "
+            "to the *Pluto RW slacks*")
+else:
+    _who = (f"for your {N_PRODUCTS} uploaded products, such as "
+            f"*{base_df['Name'].iloc[0]}*")
 GREETING = (
-    "Hello! I'm Stock Pilot, your AI inventory agent for 18 H&M products, "
-    "from basics like the *Brit Baby Tee* to the *Pluto RW slacks*. I can tell "
+    f"Hello! I'm Stock Pilot, your AI inventory agent {_who}. I can tell "
     "you which products to reorder, how many units to order, why, and what "
     "happens if demand, lead time, costs or the forecast window change.\n\n"
     "For what-if questions I'll ask you for the new value (for example "
@@ -272,7 +305,7 @@ def stock_vs_rop_chart(data):
     base = alt.Chart(data).encode(
         y=alt.Y("Name:N", sort=None, title=None, axis=alt.Axis(labelOverlap=False)),
         tooltip=[
-            alt.Tooltip("Name", title="Product"), alt.Tooltip("Product_ID", title="H&M article ID"),
+            alt.Tooltip("Name", title="Product"), alt.Tooltip("Product_ID", title=ID_LABEL),
             alt.Tooltip("Current_Stock", title="Current stock"),
             alt.Tooltip("ROP", title="Reorder point"),
             alt.Tooltip("Status"),
@@ -297,7 +330,7 @@ def days_of_cover_chart(data, lead_time):
     bars = base.mark_bar(cornerRadiusEnd=4, height={"band": 0.7}).encode(
         x=alt.X("Days_of_Cover:Q", title="Days of stock left at forecast demand"),
         color=alt.Color("Status:N", scale=STATUS_COLORS),
-        tooltip=[alt.Tooltip("Name", title="Product"), alt.Tooltip("Product_ID", title="H&M article ID"),
+        tooltip=[alt.Tooltip("Name", title="Product"), alt.Tooltip("Product_ID", title=ID_LABEL),
                  alt.Tooltip("Days_of_Cover", title="Days of cover"),
                  alt.Tooltip("Status")],
     )
@@ -322,7 +355,7 @@ def order_quantity_chart(data):
                          height={"band": 0.7}).encode(
         x=alt.X("Order_Quantity:Q", title="Units to order (EOQ)",
                 scale=alt.Scale(domain=[0, x_max]), axis=alt.Axis(tickCount=6)),
-        tooltip=[alt.Tooltip("Name", title="Product"), alt.Tooltip("Product_ID", title="H&M article ID"),
+        tooltip=[alt.Tooltip("Name", title="Product"), alt.Tooltip("Product_ID", title=ID_LABEL),
                  alt.Tooltip("Order_Quantity", title="Units to order")],
     )
     values = base.mark_text(align="left", dx=4, color="#202b43", fontSize=12).encode(
@@ -473,7 +506,7 @@ with dashboard_col:
                 "Photo": st.column_config.ImageColumn("Photo", width="small"),
                 "Name": st.column_config.TextColumn("Product"),
                 "Product_Type": st.column_config.TextColumn("Type"),
-                "Product_ID": st.column_config.TextColumn("H&M Article ID"),
+                "Product_ID": st.column_config.TextColumn(ID_LABEL),
                 "MAE": st.column_config.NumberColumn(
                     "Forecast MAE", format="%.2f",
                     help="Average forecast error of the moving average, units/day (back-tested over the year)"),
@@ -509,17 +542,19 @@ with dashboard_col:
         names = dict(zip(plan["Product_ID"], plan["Name"]))
         chosen = st.selectbox("Choose a product", plan["Product_ID"].tolist(),
                               format_func=lambda pid: names[pid])
-        detail = InventoryTools(base_df, assumptions).get_product_details(chosen)
+        detail = InventoryTools(base_df, assumptions, DATA_NOTE).get_product_details(chosen)
 
         pic_col, info_col = st.columns([1, 3])
         with pic_col:
             if os.path.exists(model.image_path(chosen)):
                 st.image(model.image_path(chosen), width="stretch")
         with info_col:
-            st.markdown(f"**{detail['name']}** · {detail['product_type']} · {detail['colour']}")
+            st.markdown(" · ".join(f"**{detail['name']}**" if i == 0 else v for i, v in
+                                   enumerate([detail["name"], detail["product_type"], detail["colour"]]) if v))
             if detail["description"]:
                 st.caption(detail["description"])
-            st.caption(f"H&M article ID {detail['product_id']}")
+            if USING_SAMPLE:
+                st.caption(f"H&M article ID {detail['product_id']}")
             st.markdown(f"**{detail['status']}** · stock {detail['current_stock']} units · "
                         f"{detail['days_of_cover']} days of cover")
 
@@ -563,8 +598,10 @@ with dashboard_col:
     # ------------------------------------------------------
     with tab_settings:
         st.caption(
-            "The H&M data has real sales but no costs, lead times or stock levels, "
-            "so these are labelled assumptions. Change them and click **Recalculate**; "
+            ("The H&M data has real sales but no costs, lead times or stock levels, "
+             "so these are labelled assumptions. " if USING_SAMPLE else
+             "Costs and lead time are assumptions you can change. ")
+            + "Change them and click **Recalculate**; "
             "every tab and the assistant use the new values."
         )
         with st.form("assumptions_form"):
@@ -626,7 +663,7 @@ with dashboard_col:
 
         # Results for the current settings, right under the form, so the effect
         # of Recalculate is visible without scrolling back up.
-        st.markdown("**Results with these settings** (all 18 products)")
+        st.markdown(f"**Results with these settings** (all {N_PRODUCTS} products)")
         all_summary = model.summarize(plan)
         modified = assumptions != model.DEFAULT_ASSUMPTIONS
         if modified:
@@ -672,7 +709,7 @@ with dashboard_col:
                           if round(diff) else "same as default")
         r4.metric("Annual Cost", f"${all_summary['total_annual_policy_cost']:,.0f}",
                   delta=cost_delta, delta_color="off",
-                  help="Yearly ordering + holding cost of the EOQ policy for all 18 products.")
+                  help=f"Yearly ordering + holding cost of the EOQ policy for all {N_PRODUCTS} products.")
         if modified:
             st.caption("Click **Reset to defaults** to go back to the baseline.")
         to_order = plan[plan["Status"] == "Reorder"].sort_values("Days_of_Cover")
@@ -691,10 +728,68 @@ with dashboard_col:
                 },
             )
 
-    st.caption(
-        f"Data: H&M sales (Kaggle), {sales_df.index.min():%b %Y} to {sales_df.index.max():%b %Y} · "
-        "Stock is simulated · Not affiliated with H&M"
-    )
+        # Upload your own data: same models, a store's own sales and stock.
+        st.divider()
+        st.markdown("**Use your own data**")
+        if USING_SAMPLE:
+            st.caption(
+                "Upload your store's daily sales as a CSV with columns **date, product, units** "
+                "(one row per product per day, at least 60 days). Optionally add a stock CSV with "
+                "columns **product, current_stock**; without it, stock is estimated as 10 days "
+                "of recent sales.")
+            t1, t2 = st.columns(2)
+            t1.download_button("Example sales file", SAMPLE_SALES_CSV, "example_sales.csv",
+                               "text/csv", width="stretch")
+            t2.download_button("Example stock file", SAMPLE_STOCK_CSV, "example_stock.csv",
+                               "text/csv", width="stretch")
+            with st.form("upload_form", border=False):
+                u1, u2 = st.columns(2)
+                sales_file = u1.file_uploader("Sales CSV", type="csv")
+                stock_file = u2.file_uploader("Stock CSV (optional)", type="csv")
+                use_upload = st.form_submit_button("Use this data", width="stretch")
+            if use_upload:
+                if sales_file is None:
+                    st.error("Please choose a sales CSV first.")
+                else:
+                    try:
+                        sales_raw = pd.read_csv(sales_file)
+                        stock_raw = pd.read_csv(stock_file) if stock_file is not None else None
+                        new_base, new_sales, notes = model.prepare_uploaded_data(sales_raw, stock_raw)
+                    except model.InputError as err:
+                        st.error(str(err))
+                    except Exception as err:   # unreadable file, wrong encoding, ...
+                        st.error(f"Could not read the file: {err}")
+                    else:
+                        st.session_state.custom_data = {
+                            "base": new_base, "sales": new_sales, "notes": notes,
+                            "label": sales_file.name, "version": model.MODEL_VERSION,
+                            "stock_note": ("Current stock comes from the user's stock file."
+                                           if stock_file is not None else
+                                           "No stock file: stock is estimated as 10 days of "
+                                           "recent sales, not real stock."),
+                        }
+                        st.session_state.assumptions = model.DEFAULT_ASSUMPTIONS
+                        st.session_state.pop("messages", None)   # new products, new chat
+                        st.rerun()
+        else:
+            st.success(f"Using your data: **{custom['label']}**, {N_PRODUCTS} products, "
+                       f"{len(sales_df)} days.")
+            for note in custom["notes"]:
+                st.caption(note)
+            if st.button("Back to the H&M sample data", width="stretch"):
+                st.session_state.custom_data = None
+                st.session_state.assumptions = model.DEFAULT_ASSUMPTIONS
+                st.session_state.pop("messages", None)
+                st.rerun()
+
+    if USING_SAMPLE:
+        st.caption(
+            f"Data: H&M sales (Kaggle), {sales_df.index.min():%b %Y} to {sales_df.index.max():%b %Y} · "
+            "Stock is simulated · Not affiliated with H&M"
+        )
+    else:
+        st.caption(f"Data: your upload ({custom['label']}), {sales_df.index.min():%b %d %Y} to "
+                   f"{sales_df.index.max():%b %d %Y} · {N_PRODUCTS} products")
 
 # ==========================================================
 # 6. RIGHT PANEL: RESTOCK ADVISOR (the AI chat)
@@ -761,9 +856,11 @@ with chat_col:
                     st.caption(msg["note"])
 
     # Suggested questions (useful for demos).
+    example = "Lucy blouse" if USING_SAMPLE else model.prioritize(plan)["Name"].head(1).tolist()
+    example = example if isinstance(example, str) else (example[0] if example else base_df["Name"].iloc[0])
     suggestions = ["Which products should I prioritize?",
                    "What if demand increases by 20%?",
-                   "Why does Lucy blouse need replenishment?"]
+                   f"Why does {example} need replenishment?"]
     picked = None
     st.markdown('<p class="try-label">Try asking</p>', unsafe_allow_html=True)
     for text in suggestions:   # stacked so the full question is always readable
@@ -788,13 +885,13 @@ with chat_col:
                    for m in st.session_state.messages]
         st.session_state.messages.append({"role": "user", "content": question})
 
-        tools = InventoryTools(base_df, st.session_state.assumptions)
+        tools = InventoryTools(base_df, st.session_state.assumptions, DATA_NOTE)
         note = None
 
         with st.spinner("Thinking..."):
             if AI_ENABLED:
                 try:
-                    reply = GeminiAgent(API_KEY, MODEL_NAME).ask(question, history, tools)
+                    reply = GeminiAgent(API_KEY, MODEL_NAME, data_note=DATA_NOTE).ask(question, history, tools)
                 except Exception as err:
                     # Never fail silently: say Gemini failed and answer offline.
                     reply = OfflineAssistant().ask(question, history, tools)

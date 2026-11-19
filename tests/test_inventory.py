@@ -323,3 +323,49 @@ def test_agent_can_switch_forecast_model(tools):
     cmp = detail["model_comparison_on_holdout"]
     assert cmp["more_accurate_model"] == "exponential smoothing"
     assert detail["forecast_model"].startswith("Exponential smoothing")
+
+
+# ---------------------------------------------------------------- 7. user-uploaded data
+EXAMPLE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                           "data", "example_upload")
+
+
+def _example():
+    return (pd.read_csv(os.path.join(EXAMPLE_DIR, "example_sales.csv")),
+            pd.read_csv(os.path.join(EXAMPLE_DIR, "example_stock.csv")))
+
+
+def test_upload_gives_same_results_as_sample():
+    sales, stock = _example()
+    base, wide, notes = m.prepare_uploaded_data(sales, stock)
+    plan = m.calculate_plan(base).set_index("Name")
+    assert len(wide) == 120 and len(plan) == 5 and notes == []
+    # Same sales and stock as the H&M sample -> same orders.
+    assert plan.loc["Brit Baby Tee", "Order_Quantity"] == 412
+    assert plan.loc["Harrison short sleeve top CN", "Order_Quantity"] == 704
+
+
+def test_upload_without_stock_estimates_it():
+    sales, _ = _example()
+    base, _, notes = m.prepare_uploaded_data(sales)
+    assert "estimated" in notes[0]
+    assert (base["Current_Stock"] > 0).all()
+
+
+@pytest.mark.parametrize("change, message", [
+    (lambda s: s.rename(columns={"units": "price"}), "units"),
+    (lambda s: s.assign(units=s["units"].astype(object).where(s.index != 3, "lots")), "not a number"),
+    (lambda s: s.assign(units=s["units"].where(s.index != 5, -4)), "negative"),
+    (lambda s: s.assign(date=s["date"].where(s.index != 7, "yesterday")), "date"),
+    (lambda s: s[s["date"] >= "2020-08-01"], "at least 60 days"),
+])
+def test_upload_rejects_bad_files(change, message):
+    sales, stock = _example()
+    with pytest.raises(m.InputError, match=message):
+        m.prepare_uploaded_data(change(sales), stock)
+
+
+def test_upload_rejects_missing_stock_rows():
+    sales, stock = _example()
+    with pytest.raises(m.InputError, match="no stock for"):
+        m.prepare_uploaded_data(sales, stock.iloc[:3])
