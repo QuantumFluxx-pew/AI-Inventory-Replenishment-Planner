@@ -81,6 +81,7 @@ The agent **asks for missing inputs** ("increase demand by how much?") instead o
 | `kaggle/hm_select_products.py` | Step 1: runs on Kaggle to pick steady products from 31M purchases |
 | `prepare_data.py` | Step 2: cleans the Kaggle output into `data/` and `images/` |
 | `notebooks/…HM.ipynb` | Colab notebook: the full model walk-through with tests |
+| `evaluation/live_gemini_runs.md` | Live AI evaluation: the 6 demo questions asked 3 times each |
 | `data/example_upload/` | Example sales and stock files for the upload feature |
 | `tests/test_inventory.py` | 45 automated tests |
 | `.streamlit/config.toml` | Forces the light theme |
