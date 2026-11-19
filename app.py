@@ -330,22 +330,31 @@ def order_quantity_chart(data):
     return _style(bars + values, height=max(120, 28 * len(top)))
 
 
-def sales_history_chart(daily_sales, window, days=90):
-    """Actual daily units sold (bars) vs. the one-day-ahead moving-average
-    forecast (line) for the last `days` days. Shows how well the SMA tracks."""
-    forecast = model.sma_backtest(daily_sales.reset_index(drop=True), window).values
+def sales_history_chart(daily_sales, window, alpha, uses_ses, days=90):
+    """Actual daily units sold (bars) vs. both one-day-ahead forecasts (lines)
+    for the last `days` days. The model in use is drawn solid and black; the
+    other one dashed and grey, for comparison."""
+    y = daily_sales.reset_index(drop=True)
+    sma_name = f"{window}-day moving average"
+    ses_name = f"Exponential smoothing (alpha {alpha:g})"
     frame = pd.DataFrame({"Date": daily_sales.index, "Actual units sold": daily_sales.values,
-                          f"{window}-day SMA forecast": forecast}).tail(days)
+                          sma_name: model.sma_backtest(y, window).values,
+                          ses_name: model.ses_backtest(y, alpha)}).tail(days)
     long = frame.melt("Date", var_name="Series", value_name="Units")
-    colors = alt.Scale(domain=["Actual units sold", f"{window}-day SMA forecast"],
-                       range=["#cfcfcb", "#111111"])
+    used, other = (ses_name, sma_name) if uses_ses else (sma_name, ses_name)
+    colors = alt.Scale(domain=["Actual units sold", used, other],
+                       range=["#cfcfcb", "#111111", "#8a8984"])
     tips = [alt.Tooltip("Date:T"), alt.Tooltip("Series:N"), alt.Tooltip("Units:Q", format=".1f")]
     bars = alt.Chart(long[long["Series"] == "Actual units sold"]).mark_bar(width={"band": 0.8}).encode(
         x=alt.X("Date:T", title=None), y=alt.Y("Units:Q", title="Units per day"),
-        color=alt.Color("Series:N", scale=colors), tooltip=tips)
-    line = alt.Chart(long[long["Series"] != "Actual units sold"]).mark_line(strokeWidth=2.5).encode(
+        color=alt.Color("Series:N", scale=colors, legend=alt.Legend(orient="top", title=None)),
+        tooltip=tips)
+    other_line = alt.Chart(long[long["Series"] == other]).mark_line(
+        strokeWidth=1.8, strokeDash=[5, 4]).encode(
         x="Date:T", y="Units:Q", color=alt.Color("Series:N", scale=colors), tooltip=tips)
-    return _style(bars + line, height=240)
+    used_line = alt.Chart(long[long["Series"] == used]).mark_line(strokeWidth=2.5).encode(
+        x="Date:T", y="Units:Q", color=alt.Color("Series:N", scale=colors), tooltip=tips)
+    return _style(bars + other_line + used_line, height=260)
 
 # ==========================================================
 # 4. HEADER
@@ -455,7 +464,7 @@ with dashboard_col:
             {"Reorder": "Reorder", "Sufficient Stock": "Sufficient"})
         table["Photo"] = table["Product_ID"].map(photo_uri)
         table_cols = ["Photo", "Name", "Product_Type", "Status", "Current_Stock", "ROP",
-                      "Order_Quantity", "EOQ", "Days_of_Cover", "Daily_Demand", "MAE",
+                      "Order_Quantity", "EOQ", "Days_of_Cover", "Daily_Demand", "Forecast_Model", "MAE",
                       "Annual_Demand", "Annual_Cost", "Safety_Stock", "Product_ID"]
         st.dataframe(
             table[table_cols],
@@ -475,6 +484,7 @@ with dashboard_col:
                 "Days_of_Cover": st.column_config.NumberColumn("Days of Cover", format="%.1f",
                                                                help="Stock ÷ forecast daily demand"),
                 "Daily_Demand": st.column_config.NumberColumn("Daily Demand", format="%.2f"),
+                "Forecast_Model": st.column_config.TextColumn("Forecast Model"),
                 "Annual_Demand": st.column_config.NumberColumn("Annual Demand", format="%.0f"),
                 "Annual_Cost": st.column_config.NumberColumn(
                     "Annual Cost", format="$%.0f",
@@ -521,8 +531,12 @@ with dashboard_col:
         d4.metric("Order Now", detail["recommended_order_units"])
 
         steps = detail["calculation_steps"]
+        cmp = detail["model_comparison_on_holdout"]
+        uses_ses = detail["forecast_model"].startswith("Exponential")
+        how = (f"exponential smoothing (alpha {cmp['exponential_smoothing_alpha']:g})"
+               if uses_ses else f"average of the last {detail['sma_window_days']} days of sales")
         st.markdown(
-            f"1. **Forecast:** average of the last {detail['sma_window_days']} days of sales = "
+            f"1. **Forecast:** {how} = "
             f"`{detail['sma_forecast_units_per_day']} units/day`\n"
             f"2. **Annual demand:** `{steps['annual_demand']}`\n"
             f"3. **EOQ:** `{steps['eoq']}`\n"
@@ -531,9 +545,17 @@ with dashboard_col:
             f"6. **Annual cost:** `{steps['annual_cost']}`"
         )
 
+        sma_hold = cmp[f"{detail['sma_window_days']}_day_moving_average_mae"]
         st.markdown(f"**Sales history vs. forecast (last 90 days)**: forecast accuracy "
                     f"(MAE over the year) = **{detail['forecast_mae_units_per_day']:.2f} units/day**")
-        chart = sales_history_chart(sales_df[chosen], assumptions.sma_window)
+        st.caption(
+            f"Model comparison on the last 4 months (not used to fit either model): "
+            f"moving average error {sma_hold:.2f}, exponential smoothing error "
+            f"{cmp['exponential_smoothing_mae']:.2f} units/day, so "
+            f"**{cmp['more_accurate_model']}** is more accurate for this product. "
+            f"Forecast model in use: {detail['forecast_model']}.")
+        chart = sales_history_chart(sales_df[chosen], assumptions.sma_window,
+                                    cmp["exponential_smoothing_alpha"], uses_ses)
         st.altair_chart(chart, width="stretch", height=chart.height)
 
     # ------------------------------------------------------
@@ -572,6 +594,16 @@ with dashboard_col:
                 help="How many recent days the moving-average forecast averages.",
             )
 
+            c7, _, _ = st.columns(3)
+            forecast_model = c7.selectbox(
+                "Forecast model",
+                model.ALLOWED_FORECAST_MODELS,
+                index=model.ALLOWED_FORECAST_MODELS.index(assumptions.forecast_model),
+                format_func=lambda k: model.FORECAST_MODEL_NAMES[k],
+                help="Moving average, exponential smoothing, or the more accurate of the two "
+                     "for each product (judged on the last 4 months of sales).",
+            )
+
             b1, b2 = st.columns(2)
             recalc = b1.form_submit_button("Recalculate", width="stretch")
             reset = b2.form_submit_button("Reset to defaults", width="stretch")
@@ -582,6 +614,7 @@ with dashboard_col:
                     ordering_cost=ordering_cost, holding_cost=holding_cost,
                     lead_time_days=lead_time, demand_change_pct=demand_change,
                     service_level=service_level, sma_window=sma_window,
+                    forecast_model=forecast_model,
                 )
                 st.rerun()
             except model.InputError as err:
@@ -607,6 +640,9 @@ with dashboard_col:
                 ("Safety stock", d.service_level, assumptions.service_level, "{:g}%"),
                 ("Forecast window", d.sma_window, assumptions.sma_window, "{:g} days"),
             ]
+            if d.forecast_model != assumptions.forecast_model:
+                fields.append(("Forecast model", model.FORECAST_MODEL_NAMES[d.forecast_model],
+                               model.FORECAST_MODEL_NAMES[assumptions.forecast_model], "{}"))
             changes = [f"{name} <b>{fmt.format(old)} → {fmt.format(new)}</b>"
                        for name, old, new, fmt in fields if old != new]
             st.markdown(

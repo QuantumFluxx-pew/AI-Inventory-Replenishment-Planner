@@ -14,11 +14,17 @@ Recommendations dataset on Kaggle. See prepare_data.py.
 
 Models:
 
-1. Simple Moving Average (SMA) forecast
+1. Forecasting (two models)
+   a. Simple Moving Average (SMA)
        d = average of the last N days of sales        (units/day, N = 7 by default)
+   b. Simple Exponential Smoothing (SES)
+       level_t = alpha * sales_t + (1 - alpha) * level_(t-1); forecast = latest level
+       alpha is fitted per product on the first 2/3 of the year
+   "Best" picks, per product, the model with the lower error on the last 1/3
+   of the year (a hold-out period neither model was fitted on).
 2. Forecast accuracy (MAE)
-       back-test over the whole year: for each day, forecast it with the
-       average of the N days before it, then average the absolute errors
+       back-test over the year: forecast each day from the days before it,
+       then average the absolute errors
 3. Economic Order Quantity (EOQ)
        EOQ = ceil( sqrt( 2 * D * S / H ) )
        D = annual demand = d * 365, S = cost per order, H = holding cost/unit/year
@@ -42,7 +48,7 @@ from statistics import NormalDist
 import numpy as np
 import pandas as pd
 
-MODEL_VERSION = "hm-2026-11-10"   # must match agent.MODEL_VERSION (see app.py)
+MODEL_VERSION = "hm-2026-11-19"   # must match agent.MODEL_VERSION (see app.py)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PRODUCTS_CSV = os.path.join(HERE, "data", "products.csv")
@@ -58,6 +64,14 @@ IMAGES_DIR = os.path.join(HERE, "images")
 ALLOWED_SERVICE_LEVELS = (0, 90, 95, 97.5, 99)
 # Moving-average windows the user may pick (days).
 ALLOWED_SMA_WINDOWS = (3, 7, 14, 28)
+# Forecast models the user may pick.
+ALLOWED_FORECAST_MODELS = ("sma", "ses", "best")
+FORECAST_MODEL_NAMES = {"sma": "Moving average", "ses": "Exponential smoothing",
+                        "best": "Best per product"}
+# Exponential smoothing: alpha values tried, and the back-test periods.
+SES_ALPHAS = tuple(round(a, 2) for a in np.arange(0.05, 0.951, 0.05))
+BACKTEST_START = 28          # first day scored (gives every model a warm-up)
+HOLDOUT_SHARE = 1 / 3        # last third of the year is the hold-out period
 
 
 class InputError(ValueError):
@@ -78,6 +92,7 @@ class Assumptions:
     demand_change_pct: float = 0.0    # scenario: +20 means demand is 20% higher
     service_level: float = 0.0        # safety stock service level (%), 0 = none
     sma_window: int = 7               # days in the moving-average forecast
+    forecast_model: str = "sma"       # "sma", "ses" or "best" (per product)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -115,6 +130,19 @@ def validate_assumptions(**values) -> Assumptions:
     for name, value in values.items():
         if value is None:
             continue  # not supplied -> keep the current value
+
+        if name == "forecast_model":
+            key = str(value).strip().lower()
+            aliases = {"moving average": "sma", "simple moving average": "sma",
+                       "exponential smoothing": "ses", "simple exponential smoothing": "ses",
+                       "best per product": "best", "auto": "best"}
+            key = aliases.get(key, key)
+            if key not in ALLOWED_FORECAST_MODELS:
+                problems.append("Forecast model must be 'sma' (moving average), 'ses' "
+                                f"(exponential smoothing) or 'best' (got '{value}').")
+                continue
+            clean[name] = key
+            continue
 
         if name in choices:
             allowed, label, unit, hint = choices[name]
@@ -191,6 +219,50 @@ def sma_mae(daily_sales, window: int = 7) -> float:
     sales = pd.Series(daily_sales, dtype=float).reset_index(drop=True)
     predictions = sma_backtest(sales, window)
     return float((sales - predictions).abs().mean())  # NaNs are skipped
+
+
+def ses_backtest(daily_sales, alpha: float, init_days: int = 7) -> np.ndarray:
+    """One-day-ahead exponential-smoothing forecasts for every day.
+
+    The level starts at the average of the first `init_days` days. The
+    forecast for day t is the level after day t-1; then the level moves a
+    share `alpha` of the way towards that day's actual sales.
+    """
+    sales = np.asarray(daily_sales, dtype=float)
+    if not 0 < alpha <= 1:
+        raise InputError("Smoothing constant alpha must be between 0 and 1.")
+    if len(sales) < init_days:
+        raise InputError(f"Need at least {init_days} days of sales, got {len(sales)}.")
+    forecasts = np.empty(len(sales))
+    level = sales[:init_days].mean()
+    for t, actual in enumerate(sales):
+        forecasts[t] = level
+        level = alpha * actual + (1 - alpha) * level
+    return forecasts
+
+
+def ses_forecast(daily_sales, alpha: float) -> float:
+    """Forecast for tomorrow: the smoothed level after the last day."""
+    sales = np.asarray(daily_sales, dtype=float)
+    last_forecast = ses_backtest(sales, alpha)[-1]
+    return float(alpha * sales[-1] + (1 - alpha) * last_forecast)
+
+
+def _mae(actual, predicted, start, end=None) -> float:
+    a = np.asarray(actual, dtype=float)[start:end]
+    p = np.asarray(predicted, dtype=float)[start:end]
+    ok = ~np.isnan(p)
+    return float(np.abs(a[ok] - p[ok]).mean())
+
+
+def fit_ses_alpha(daily_sales, start: int = BACKTEST_START, end: int | None = None) -> float:
+    """Alpha (from SES_ALPHAS) with the lowest back-test MAE on days start..end."""
+    return min(SES_ALPHAS, key=lambda a: _mae(daily_sales, ses_backtest(daily_sales, a), start, end))
+
+
+def holdout_start(n_days: int) -> int:
+    """First day of the hold-out period (the last third of the history)."""
+    return int(round(n_days * (1 - HOLDOUT_SHARE)))
 
 
 # ----------------------------------------------------------------------
@@ -281,6 +353,23 @@ def load_base_data(products_path: str = PRODUCTS_CSV,
     for window in ALLOWED_SMA_WINDOWS:
         products[f"SMA_{window}"] = [sma_forecast(sales[p], window) for p in products["Product_ID"]]
         products[f"MAE_{window}"] = [sma_mae(sales[p], window) for p in products["Product_ID"]]
+
+    # Exponential smoothing: alpha fitted on the first 2/3 of the year, then
+    # both models are scored on the last 1/3 (the hold-out), which decides
+    # the "best per product" choice.
+    split = holdout_start(len(sales))
+    for col in ["SES", "SES_ALPHA", "SES_MAE", "HOLD_SES"] + [f"HOLD_SMA_{w}" for w in ALLOWED_SMA_WINDOWS]:
+        products[col] = 0.0
+    for i, pid in products["Product_ID"].items():
+        y = sales[pid].to_numpy(dtype=float)
+        alpha = fit_ses_alpha(y, BACKTEST_START, split)
+        ses_path = ses_backtest(y, alpha)
+        products.at[i, "SES_ALPHA"] = alpha
+        products.at[i, "SES"] = ses_forecast(y, alpha)
+        products.at[i, "SES_MAE"] = _mae(y, ses_path, BACKTEST_START)
+        products.at[i, "HOLD_SES"] = _mae(y, ses_path, split)
+        for w in ALLOWED_SMA_WINDOWS:
+            products.at[i, f"HOLD_SMA_{w}"] = _mae(y, sma_backtest(y, w).to_numpy(), split)
     return products
 
 
@@ -297,9 +386,19 @@ def calculate_plan(base: pd.DataFrame, assumptions: Assumptions = DEFAULT_ASSUMP
     a = assumptions
     plan = base.copy()
 
-    # Forecast for the chosen window, adjusted for any what-if demand change.
-    plan["SMA"] = plan[f"SMA_{a.sma_window}"]
-    plan["MAE"] = plan[f"MAE_{a.sma_window}"]
+    # Forecast from the chosen model, adjusted for any what-if demand change.
+    # (The column keeps the name "SMA" for the forecast; Forecast_Model says
+    # which model produced it.)
+    use_ses = np.full(len(plan), a.forecast_model == "ses")
+    if a.forecast_model == "best":
+        use_ses = (plan["HOLD_SES"] < plan[f"HOLD_SMA_{a.sma_window}"]).to_numpy()
+    sma_label = f"{a.sma_window}-day moving average"
+    plan["SMA"] = np.where(use_ses, plan["SES"], plan[f"SMA_{a.sma_window}"])
+    plan["MAE"] = np.where(use_ses, plan["SES_MAE"], plan[f"MAE_{a.sma_window}"])
+    plan["Forecast_Model"] = [
+        f"Exponential smoothing (alpha {al:g})" if s else sma_label
+        for s, al in zip(use_ses, plan["SES_ALPHA"])]
+    plan["Holdout_MAE"] = np.where(use_ses, plan["HOLD_SES"], plan[f"HOLD_SMA_{a.sma_window}"])
     plan["Daily_Demand"] = plan["SMA"] * (1 + a.demand_change_pct / 100)
     plan["Annual_Demand"] = plan["Daily_Demand"] * 365
 

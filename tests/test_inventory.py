@@ -277,3 +277,49 @@ def test_agent_retries_empty_reply(tools):
     reply = GeminiAgent("test-key", client=Client()).ask("how many units available?", [], tools)
     assert reply.text.startswith("You have 3,346 units")
     assert Models.calls == 3
+
+
+# ---------------------------------------------------------------- 6. second forecast model
+def test_ses_by_hand():
+    # Level starts at the 7-day average (10). Day 8 sells 20, so with alpha 0.5
+    # the level moves halfway: 0.5 x 20 + 0.5 x 10 = 15 = tomorrow's forecast.
+    data = [10] * 7 + [20]
+    assert list(m.ses_backtest(data, 0.5)) == [10.0] * 8
+    assert m.ses_forecast(data, 0.5) == 15.0
+    # alpha = 1 means "tomorrow = today".
+    assert m.ses_forecast([3, 5, 9, 4, 6, 8, 2, 7], 1.0) == 7.0
+    with pytest.raises(m.InputError):
+        m.ses_backtest(data, 0)
+
+
+def test_ses_alpha_fitted_per_product(base):
+    assert set(base["SES_ALPHA"]) <= set(m.SES_ALPHAS)
+    r = row(base, BRIT_TEE)
+    assert 0 < r["SES"] < 50 and r["HOLD_SES"] > 0
+
+
+def test_best_model_picks_lower_holdout_error(base):
+    plan = m.calculate_plan(base, m.validate_assumptions(forecast_model="best"))
+    expected = plan[["HOLD_SES", "HOLD_SMA_7"]].min(axis=1)
+    assert (plan["Holdout_MAE"] == expected).all()
+    # On the hold-out period, exponential smoothing beats the 7-day average
+    # for 14 of the 18 products.
+    assert int((base["HOLD_SES"] < base["HOLD_SMA_7"]).sum()) == 14
+    # The default is still the 7-day moving average (Milestone 2 results unchanged).
+    default = m.calculate_plan(base)
+    assert default["Forecast_Model"].eq("7-day moving average").all()
+
+
+def test_forecast_model_validation():
+    assert m.validate_assumptions(forecast_model="Exponential smoothing").forecast_model == "ses"
+    with pytest.raises(m.InputError, match="Forecast model"):
+        m.validate_assumptions(forecast_model="arima")
+
+
+def test_agent_can_switch_forecast_model(tools):
+    tools.call("update_assumptions", {"forecast_model": "best"})
+    assert tools.assumptions.forecast_model == "best"
+    detail = tools.call("get_product_details", {"product_id": "Harrison"})
+    cmp = detail["model_comparison_on_holdout"]
+    assert cmp["more_accurate_model"] == "exponential smoothing"
+    assert detail["forecast_model"].startswith("Exponential smoothing")

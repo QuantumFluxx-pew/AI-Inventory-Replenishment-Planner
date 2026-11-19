@@ -25,13 +25,18 @@ How they were chosen:
 
 | Model | Formula | Purpose |
 |---|---|---|
-| Simple Moving Average | d = mean of last N days (N = 7 by default) | Daily demand forecast |
+| Simple Moving Average | d = mean of last N days (N = 7 by default) | Daily demand forecast (default model) |
+| Simple Exponential Smoothing | level = α·sales + (1 − α)·previous level; α fitted per product | Second forecast model |
+| Best per product | the model with the lower error on the last 1/3 of the year | Picks the more accurate forecast |
 | MAE (back-test) | mean \|actual − one-day-ahead SMA\| over the year | Forecast accuracy |
 | Economic Order Quantity | EOQ = ⌈√(2DS / H)⌉, D = 365·d | How much to order |
 | Reorder Point | ROP = ⌈d·L + safety stock⌉ | When to order |
 | Safety stock (optional) | z · 1.25·MAE · √L | Buffer for forecast error |
+| Annual cost | (D / EOQ)·S + (EOQ / 2)·H | Yearly ordering + holding cost of the policy |
 
 Rule: if current stock ≤ ROP, order EOQ units.
+
+Exponential smoothing vs. moving average: α is fitted on the first 2/3 of the year, and both models are scored on the last 1/3, which neither was fitted on. Exponential smoothing has the lower error for 14 of the 18 products. Pick the model in **Settings → Forecast model** (or ask Stock Pilot).
 
 Why a 7-day window? Comparing windows across all 18 products, the median scaled error is 0.366 (3 days), **0.350 (7 days)**, 0.381 (14 days) and 0.412 (28 days).
 
@@ -75,7 +80,7 @@ The agent **asks for missing inputs** ("increase demand by how much?") instead o
 | `kaggle/hm_select_products.py` | Step 1: runs on Kaggle to pick steady products from 31M purchases |
 | `prepare_data.py` | Step 2: cleans the Kaggle output into `data/` and `images/` |
 | `notebooks/…HM.ipynb` | Colab notebook: the full model walk-through with tests |
-| `tests/test_inventory.py` | 31 automated tests |
+| `tests/test_inventory.py` | 36 automated tests |
 | `.streamlit/config.toml` | Forces the light theme |
 
 ## Run it on your computer

@@ -92,8 +92,9 @@ class InventoryTools:
             "notes": (
                 "Ordering cost, holding cost and lead time are sample assumptions, "
                 "not real H&M figures. Current stock is simulated because the H&M "
-                "dataset has no inventory data. Demand forecast is a "
-                f"{a.sma_window}-day simple moving average of real H&M daily sales "
+                "dataset has no inventory data. Demand forecast model: "
+                f"{model.FORECAST_MODEL_NAMES[a.forecast_model]} "
+                f"(moving-average window {a.sma_window} days), from real H&M daily sales "
                 "(one year, 2019-09-24 to 2020-09-22)."
             ),
         }
@@ -139,8 +140,18 @@ class InventoryTools:
         details.update({
             "description": row["Description"],
             "sma_window_days": a.sma_window,
+            "forecast_model": row["Forecast_Model"],
             "sma_forecast_units_per_day": _r(float(row["SMA"]), 3),
             "forecast_mae_units_per_day": _r(float(row["MAE"]), 3),
+            "model_comparison_on_holdout": {
+                "holdout_period": "last 1/3 of the year (not used to fit either model)",
+                f"{a.sma_window}_day_moving_average_mae": _r(float(row[f"HOLD_SMA_{a.sma_window}"]), 3),
+                "exponential_smoothing_mae": _r(float(row["HOLD_SES"]), 3),
+                "exponential_smoothing_alpha": float(row["SES_ALPHA"]),
+                "more_accurate_model": ("exponential smoothing"
+                                        if row["HOLD_SES"] < row[f"HOLD_SMA_{a.sma_window}"]
+                                        else f"{a.sma_window}-day moving average"),
+            },
             "annual_demand": _r(float(row["Annual_Demand"]), 1),
             "safety_stock": float(row["Safety_Stock"]),
             "lead_time_days": a.lead_time_days,
@@ -194,7 +205,7 @@ class InventoryTools:
         }
 
     def run_what_if(self, demand_change_pct=None, lead_time_days=None, ordering_cost=None,
-                    holding_cost=None, service_level=None, sma_window=None, product_id=None) -> dict:
+                    holding_cost=None, service_level=None, sma_window=None, forecast_model=None, product_id=None) -> dict:
         """Compare the current plan with a hypothetical one. Does NOT change
         the dashboard; use update_assumptions for that."""
         scenario = model.validate_assumptions(
@@ -202,6 +213,7 @@ class InventoryTools:
             demand_change_pct=demand_change_pct, lead_time_days=lead_time_days,
             ordering_cost=ordering_cost, holding_cost=holding_cost,
             service_level=service_level, sma_window=sma_window,
+            forecast_model=forecast_model,
         )
         if scenario == self.assumptions:
             return {"error": "No change given. Ask the user which input to change and by how much."}
@@ -238,13 +250,14 @@ class InventoryTools:
         }
 
     def update_assumptions(self, demand_change_pct=None, lead_time_days=None, ordering_cost=None,
-                           holding_cost=None, service_level=None, sma_window=None) -> dict:
+                           holding_cost=None, service_level=None, sma_window=None, forecast_model=None) -> dict:
         """Permanently change the inputs used by the dashboard and the agent."""
         new = model.validate_assumptions(
             base=self.assumptions,
             demand_change_pct=demand_change_pct, lead_time_days=lead_time_days,
             ordering_cost=ordering_cost, holding_cost=holding_cost,
             service_level=service_level, sma_window=sma_window,
+            forecast_model=forecast_model,
         )
         old = self.assumptions
         self.assumptions = new
@@ -296,6 +309,9 @@ _ASSUMPTION_PROPS = {
     "holding_cost": {"type": "number", "description": "Holding cost per unit per year, in dollars (> 0)."},
     "service_level": {"type": "number", "description": "Safety-stock service level %: one of 0, 90, 95, 97.5, 99. 0 = no safety stock."},
     "sma_window": {"type": "integer", "description": "Days in the moving-average forecast: one of 3, 7, 14, 28."},
+    "forecast_model": {"type": "string", "enum": ["sma", "ses", "best"],
+                       "description": "Forecast model: 'sma' = moving average, 'ses' = exponential smoothing, "
+                                      "'best' = whichever is more accurate for each product."},
 }
 
 TOOL_SPECS = [
@@ -327,7 +343,7 @@ TOOL_SPECS = [
      "description": "Permanently change the assumptions used by the dashboard, only when the user asks to set/change/use new values going forward.",
      "parameters": {"type": "object", "properties": _ASSUMPTION_PROPS}},
     {"name": "reset_assumptions",
-     "description": "Restore the default assumptions (S=$50, H=$2, 7-day lead time, no safety stock, no demand change, 7-day forecast window).",
+     "description": "Restore the default assumptions (S=$50, H=$2, 7-day lead time, no safety stock, no demand change, 7-day moving-average forecast).",
      "parameters": {"type": "object", "properties": {}}},
 ]
 
@@ -339,7 +355,11 @@ You work with 18 steady-selling H&M clothing products (real product names, e.g.
 Users may refer to products by name or part of a name; pass their words to the tools.
 
 Your models (run by Python tools, never by you):
-- Simple Moving Average demand forecast, 7-day window by default (accuracy measured by MAE)
+- Two demand forecast models (accuracy measured by MAE):
+  * Simple Moving Average, 7-day window by default (the default model)
+  * Simple Exponential Smoothing, alpha fitted per product
+  * "best" picks, per product, the model with the lower error on a hold-out period
+  get_product_details gives the forecast model used and both models' hold-out errors.
 - Economic Order Quantity: EOQ = sqrt(2DS/H)
 - Reorder Point: ROP = daily demand x lead time (+ optional safety stock)
 - Rule: reorder EOQ units when current stock <= ROP
@@ -645,7 +665,7 @@ class OfflineAssistant:
                 f"**{res['name']}** ({res['product_type']}, {res['colour']}): "
                 f"**{res['status']}**\n\n"
                 f"- Forecast demand: {res['daily_demand_forecast']} units/day "
-                f"({res['sma_window_days']}-day SMA)\n"
+                f"({res['forecast_model']})\n"
                 f"- Current stock: {res['current_stock']} units, about "
                 f"{res['days_of_cover']} days of cover vs a {res['lead_time_days']:g}-day lead time\n"
                 f"- Reorder point: {steps['reorder_point']}\n"
