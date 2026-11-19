@@ -380,7 +380,7 @@ def sales_history_chart(daily_sales, window, alpha, uses_ses, days=90):
     tips = [alt.Tooltip("Date:T"), alt.Tooltip("Series:N"), alt.Tooltip("Units:Q", format=".1f")]
     bars = alt.Chart(long[long["Series"] == "Actual units sold"]).mark_bar(width={"band": 0.8}).encode(
         x=alt.X("Date:T", title=None), y=alt.Y("Units:Q", title="Units per day"),
-        color=alt.Color("Series:N", scale=colors, legend=alt.Legend(orient="top", title=None)),
+        color=alt.Color("Series:N", scale=colors, legend=alt.Legend(orient="top", title=None, labelLimit=0)),
         tooltip=tips)
     other_line = alt.Chart(long[long["Series"] == other]).mark_line(
         strokeWidth=1.8, strokeDash=[5, 4]).encode(
