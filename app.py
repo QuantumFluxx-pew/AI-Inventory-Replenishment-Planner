@@ -733,15 +733,28 @@ with dashboard_col:
         st.markdown("**Use your own data**")
         if USING_SAMPLE:
             st.caption(
-                "Upload your store's daily sales as a CSV with columns **date, product, units** "
-                "(one row per product per day, at least 60 days). Optionally add a stock CSV with "
-                "columns **product, current_stock**; without it, stock is estimated as 10 days "
-                "of recent sales.")
-            t1, t2 = st.columns(2)
-            t1.download_button("Example sales file", SAMPLE_SALES_CSV, "example_sales.csv",
-                               "text/csv", width="stretch")
-            t2.download_button("Example stock file", SAMPLE_STOCK_CSV, "example_stock.csv",
-                               "text/csv", width="stretch")
+                "1. Download the templates and fill them in with your store's data "
+                "(or use them as they are to try the feature). "
+                "2. Upload them below and click **Use this data**.")
+            f1, f2 = st.columns(2)
+            with f1:
+                st.markdown("**Sales template**: one row per product per day, at least 60 days")
+                st.dataframe(pd.DataFrame({"date": ["2020-05-26", "2020-05-26", "2020-05-27"],
+                                           "product": ["Brit Baby Tee", "Lucy blouse", "Brit Baby Tee"],
+                                           "units": [28, 3, 20]}),
+                             hide_index=True, width="stretch")
+                st.download_button("Download sales template", SAMPLE_SALES_CSV,
+                                   "sales_template.csv", "text/csv", width="stretch")
+            with f2:
+                st.markdown("**Stock template** (optional): units in stock now, one row per product")
+                st.dataframe(pd.DataFrame({"product": ["Brit Baby Tee", "Lucy blouse"],
+                                           "current_stock": [65, 180]}),
+                             hide_index=True, width="stretch")
+                st.download_button("Download stock template", SAMPLE_STOCK_CSV,
+                                   "stock_template.csv", "text/csv", width="stretch")
+            st.caption("Column names like item, sku, quantity, qty or stock also work, and extra "
+                       "columns are ignored. Without a stock file, stock is estimated as 10 days "
+                       "of recent sales.")
             with st.form("upload_form", border=False):
                 u1, u2 = st.columns(2)
                 sales_file = u1.file_uploader("Sales CSV", type="csv")

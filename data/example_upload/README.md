@@ -1,6 +1,6 @@
 # Example upload files
 
-Use these to try **Settings → Use your own data**.
+Use these to try **Settings → Use your own data**. In the app they download as `sales_template.csv` and `stock_template.csv`.
 
 * `example_sales.csv`: columns `date, product, units`, one row per product per day.
   The last 120 days of real H&M sales for 5 of the 18 products.
