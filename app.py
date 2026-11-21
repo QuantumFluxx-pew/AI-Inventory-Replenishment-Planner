@@ -79,10 +79,7 @@ st.markdown("""
                      text-transform: uppercase; color: #111; }
     h2.dash-title { font-family: 'Syne', 'Helvetica Neue', Arial, sans-serif !important;
                     font-weight: 800; letter-spacing: 0.03em; }
-    h2.dash-title { background: linear-gradient(90deg, #000000 0%, #3a3a3a 50%, #707070 100%);
-                    -webkit-background-clip: text; background-clip: text;
-                    -webkit-text-fill-color: transparent; color: transparent;
-                    width: fit-content; }
+    h2.dash-title span { display: inline; }  /* mosaic: each letter a different shade of black */
     h2.assist-title { font-family: 'Space Grotesk', 'Helvetica Neue', Arial, sans-serif !important;
                       font-weight: 700; letter-spacing: 0.01em; }
 
@@ -410,7 +407,7 @@ dashboard_col, chat_col = st.columns([1.8, 1], gap="large")
 
 with dashboard_col:
 
-    st.markdown('<h2 class="panel-title dash-title">Inventory Dashboard</h2>', unsafe_allow_html=True)
+    st.markdown('<h2 class="panel-title dash-title"><span style="color:#000000">I</span><span style="color:#5a5a5a">n</span><span style="color:#1f1f1f">v</span><span style="color:#7a7a7a">e</span><span style="color:#333333">n</span><span style="color:#4a4a4a">t</span><span style="color:#111111">o</span><span style="color:#666666">r</span><span style="color:#2a2a2a">y</span> <span style="color:#000000">D</span><span style="color:#5a5a5a">a</span><span style="color:#1f1f1f">s</span><span style="color:#7a7a7a">h</span><span style="color:#333333">b</span><span style="color:#4a4a4a">o</span><span style="color:#111111">a</span><span style="color:#666666">r</span><span style="color:#2a2a2a">d</span></h2>', unsafe_allow_html=True)
 
     # ------------------------------------------------------
     # 5a. FILTERS + KPI CARDS (shared by all tabs)
