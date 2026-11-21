@@ -79,7 +79,24 @@ st.markdown("""
                      text-transform: uppercase; color: #111; }
     h2.dash-title { font-family: 'Syne', 'Helvetica Neue', Arial, sans-serif !important;
                     font-weight: 800; letter-spacing: 0.03em; }
-    h2.dash-title span { display: inline; }  /* mosaic: each letter a different shade of black */
+    h2.dash-title { text-shadow: 3px 3px 0 #c4c4c4; }  /* layered look: black type, light gray shadow */
+    /* Stock Pilot mascot: a little T-shirt in a pilot cap running back and forth */
+    .assist-row { display: flex; align-items: center; gap: 14px; }
+    .assist-row h2 { margin-bottom: 0.4rem !important; }
+    .pilot-track { position: relative; width: 150px; height: 52px; flex: none; }
+    .pilot { position: absolute; left: 0; bottom: 0; width: 44px; height: 50px;
+             animation: pilot-run 5s linear infinite; }
+    .pilot-body { animation: pilot-bob .3s ease-in-out infinite alternate; }
+    .pilot .leg-a { animation: pilot-leg .3s ease-in-out infinite alternate; transform-origin: 18px 40px; }
+    .pilot .leg-b { animation: pilot-leg .3s ease-in-out infinite alternate-reverse; transform-origin: 26px 40px; }
+    .pilot .scarf { animation: pilot-scarf .3s ease-in-out infinite alternate; transform-origin: 14px 13px; }
+    @keyframes pilot-run { 0% { transform: translateX(0) scaleX(1); } 48% { transform: translateX(104px) scaleX(1); }
+        50% { transform: translateX(104px) scaleX(-1); } 98% { transform: translateX(0) scaleX(-1); }
+        100% { transform: translateX(0) scaleX(1); } }
+    @keyframes pilot-bob { from { transform: translateY(0); } to { transform: translateY(-3px); } }
+    @keyframes pilot-leg { from { transform: rotate(-25deg); } to { transform: rotate(25deg); } }
+    @keyframes pilot-scarf { from { transform: rotate(-8deg); } to { transform: rotate(10deg); } }
+    @media (prefers-reduced-motion: reduce) { .pilot, .pilot * { animation: none !important; } }
     h2.assist-title { font-family: 'Space Grotesk', 'Helvetica Neue', Arial, sans-serif !important;
                       font-weight: 700; letter-spacing: 0.01em; }
 
@@ -407,7 +424,7 @@ dashboard_col, chat_col = st.columns([1.8, 1], gap="large")
 
 with dashboard_col:
 
-    st.markdown('<h2 class="panel-title dash-title"><span style="color:#000000">I</span><span style="color:#5a5a5a">n</span><span style="color:#1f1f1f">v</span><span style="color:#7a7a7a">e</span><span style="color:#333333">n</span><span style="color:#4a4a4a">t</span><span style="color:#111111">o</span><span style="color:#666666">r</span><span style="color:#2a2a2a">y</span> <span style="color:#000000">D</span><span style="color:#5a5a5a">a</span><span style="color:#1f1f1f">s</span><span style="color:#7a7a7a">h</span><span style="color:#333333">b</span><span style="color:#4a4a4a">o</span><span style="color:#111111">a</span><span style="color:#666666">r</span><span style="color:#2a2a2a">d</span></h2>', unsafe_allow_html=True)
+    st.markdown('<h2 class="panel-title dash-title">Inventory Dashboard</h2>', unsafe_allow_html=True)
 
     # ------------------------------------------------------
     # 5a. FILTERS + KPI CARDS (shared by all tabs)
@@ -815,7 +832,8 @@ with chat_col:
 
     st.markdown(
         '<div class="advisor-head">'
-        '<h2 class="panel-title assist-title">Stock Pilot</h2>'
+        '<div class="assist-row"><h2 class="panel-title assist-title">Stock Pilot</h2>'
+        '<div class="pilot-track" aria-hidden="true"><svg class="pilot" viewBox="0 0 44 50"><line class="leg-a" x1="18" y1="40" x2="18" y2="49" stroke="#111" stroke-width="3" stroke-linecap="round"/><line class="leg-b" x1="26" y1="40" x2="26" y2="49" stroke="#111" stroke-width="3" stroke-linecap="round"/><g class="pilot-body"><path class="scarf" d="M14 13 L2 10 L4 17 Z" fill="#111"/><path d="M14 11 L18 9 Q22 12 26 9 L30 11 L40 18 L36 24 L32 21 L32 41 L12 41 L12 21 L8 24 L4 18 Z" fill="#d0021b" stroke="#111" stroke-width="2" stroke-linejoin="round"/><path d="M15 10 Q22 0 29 10 Q22 7 15 10 Z" fill="#111"/><circle cx="18.5" cy="6" r="2.8" fill="#fff" stroke="#111" stroke-width="1.3"/><circle cx="25.5" cy="6" r="2.8" fill="#fff" stroke="#111" stroke-width="1.3"/><circle cx="25" cy="24" r="3" fill="#fff"/><circle cx="31" cy="24" r="3" fill="#fff"/><circle cx="25.8" cy="24.3" r="1.5" fill="#111"/><circle cx="31.8" cy="24.3" r="1.5" fill="#111"/><path d="M25 30 Q28.5 33 32 30" stroke="#fff" stroke-width="1.8" fill="none" stroke-linecap="round"/></g></svg></div></div>'
         '<p class="advisor-sub">Your AI inventory agent: ask what to reorder, how much and why.</p></div>',
         unsafe_allow_html=True)
 
