@@ -80,7 +80,7 @@ st.markdown("""
     h2.dash-title { font-family: 'Syne', 'Helvetica Neue', Arial, sans-serif !important;
                     font-weight: 800; letter-spacing: 0.03em; }
     h2.dash-title { text-shadow: 3px 3px 0 #c4c4c4; }  /* layered look: black type, light gray shadow */
-    /* Stock Pilot mascot: a little T-shirt in a pilot cap running back and forth */
+    /* Stock Pilot mascot: a little knitted muffler in a pilot cap running back and forth, with snow */
     .assist-row { display: flex; align-items: center; gap: 14px; }
     .assist-row h2 { margin-bottom: 0.4rem !important; }
     .pilot-track { position: relative; width: 150px; height: 52px; flex: none; }
@@ -89,14 +89,21 @@ st.markdown("""
     .pilot-body { animation: pilot-bob .3s ease-in-out infinite alternate; }
     .pilot .leg-a { animation: pilot-leg .3s ease-in-out infinite alternate; transform-origin: 18px 40px; }
     .pilot .leg-b { animation: pilot-leg .3s ease-in-out infinite alternate-reverse; transform-origin: 26px 40px; }
-    .pilot .scarf { animation: pilot-scarf .3s ease-in-out infinite alternate; transform-origin: 14px 13px; }
+    .pilot .scarf { animation: pilot-scarf .3s ease-in-out infinite alternate; transform-origin: 14px 19px; }
+    .pilot { overflow: visible; }
+    .snow { position: absolute; top: -6px; width: 5px; height: 5px; border-radius: 50%; background: #b9c3cc;
+            animation: pilot-snow 3.2s linear infinite; }
+    .snow.s1 { left: 12px; } .snow.s2 { left: 52px; animation-delay: -1.1s; width: 4px; height: 4px; }
+    .snow.s3 { left: 92px; animation-delay: -2.2s; } .snow.s4 { left: 134px; animation-delay: -0.6s; width: 4px; height: 4px; }
+    @keyframes pilot-snow { 0% { transform: translate(0, 0); opacity: 0; } 15% { opacity: 1; }
+        100% { transform: translate(6px, 56px); opacity: 0; } }
     @keyframes pilot-run { 0% { transform: translateX(0) scaleX(1); } 48% { transform: translateX(104px) scaleX(1); }
         50% { transform: translateX(104px) scaleX(-1); } 98% { transform: translateX(0) scaleX(-1); }
         100% { transform: translateX(0) scaleX(1); } }
     @keyframes pilot-bob { from { transform: translateY(0); } to { transform: translateY(-3px); } }
     @keyframes pilot-leg { from { transform: rotate(-25deg); } to { transform: rotate(25deg); } }
     @keyframes pilot-scarf { from { transform: rotate(-8deg); } to { transform: rotate(10deg); } }
-    @media (prefers-reduced-motion: reduce) { .pilot, .pilot * { animation: none !important; } }
+    @media (prefers-reduced-motion: reduce) { .pilot, .pilot *, .snow { animation: none !important; } }
     h2.assist-title { font-family: 'Space Grotesk', 'Helvetica Neue', Arial, sans-serif !important;
                       font-weight: 700; letter-spacing: 0.01em; }
 
@@ -833,7 +840,7 @@ with chat_col:
     st.markdown(
         '<div class="advisor-head">'
         '<div class="assist-row"><h2 class="panel-title assist-title">Stock Pilot</h2>'
-        '<div class="pilot-track" aria-hidden="true"><svg class="pilot" viewBox="0 0 44 50"><line class="leg-a" x1="18" y1="40" x2="18" y2="49" stroke="#111" stroke-width="3" stroke-linecap="round"/><line class="leg-b" x1="26" y1="40" x2="26" y2="49" stroke="#111" stroke-width="3" stroke-linecap="round"/><g class="pilot-body"><path class="scarf" d="M14 13 L2 10 L4 17 Z" fill="#111"/><path d="M14 11 L18 9 Q22 12 26 9 L30 11 L40 18 L36 24 L32 21 L32 41 L12 41 L12 21 L8 24 L4 18 Z" fill="#d0021b" stroke="#111" stroke-width="2" stroke-linejoin="round"/><path d="M15 10 Q22 0 29 10 Q22 7 15 10 Z" fill="#111"/><circle cx="18.5" cy="6" r="2.8" fill="#fff" stroke="#111" stroke-width="1.3"/><circle cx="25.5" cy="6" r="2.8" fill="#fff" stroke="#111" stroke-width="1.3"/><circle cx="25" cy="24" r="3" fill="#fff"/><circle cx="31" cy="24" r="3" fill="#fff"/><circle cx="25.8" cy="24.3" r="1.5" fill="#111"/><circle cx="31.8" cy="24.3" r="1.5" fill="#111"/><path d="M25 30 Q28.5 33 32 30" stroke="#fff" stroke-width="1.8" fill="none" stroke-linecap="round"/></g></svg></div></div>'
+        '<div class="pilot-track" aria-hidden="true"><svg class="pilot" viewBox="0 0 44 50"><line class="leg-a" x1="18" y1="40" x2="18" y2="49" stroke="#111" stroke-width="3" stroke-linecap="round"/><line class="leg-b" x1="26" y1="40" x2="26" y2="49" stroke="#111" stroke-width="3" stroke-linecap="round"/><g class="pilot-body"><g class="scarf"><path d="M14 16 Q6 14 1 19 L3 24 Q8 20 14 22 Z" fill="#d0021b" stroke="#111" stroke-width="1.5" stroke-linejoin="round"/><path d="M8 17 L9.5 22" stroke="#fff" stroke-width="2"/><path d="M1 19 L-2 18 M2 21.5 L-1.5 21.5 M3 24 L0 25.5" stroke="#111" stroke-width="1.3" stroke-linecap="round"/></g><rect x="12" y="11" width="22" height="30" rx="9" fill="#d0021b" stroke="#111" stroke-width="2"/><rect x="13" y="17" width="20" height="3" fill="#fff"/><rect x="13" y="33" width="20" height="3" fill="#fff"/><path d="M15 12 Q23 1 31 12 Q23 9 15 12 Z" fill="#111"/><circle cx="19.5" cy="7.5" r="2.8" fill="#fff" stroke="#111" stroke-width="1.3"/><circle cx="26.5" cy="7.5" r="2.8" fill="#fff" stroke="#111" stroke-width="1.3"/><circle cx="23" cy="25" r="2.8" fill="#fff"/><circle cx="29.5" cy="25" r="2.8" fill="#fff"/><circle cx="23.8" cy="25.3" r="1.4" fill="#111"/><circle cx="30.3" cy="25.3" r="1.4" fill="#111"/><path d="M23.5 29.5 Q26.5 32 29.5 29.5" stroke="#fff" stroke-width="1.8" fill="none" stroke-linecap="round"/></g></svg><span class="snow s1"></span><span class="snow s2"></span><span class="snow s3"></span><span class="snow s4"></span></div></div>'
         '<p class="advisor-sub">Your AI inventory agent: ask what to reorder, how much and why.</p></div>',
         unsafe_allow_html=True)
 
