@@ -79,7 +79,10 @@ st.markdown("""
                      text-transform: uppercase; color: #111; }
     h2.dash-title { font-family: 'Syne', 'Helvetica Neue', Arial, sans-serif !important;
                     font-weight: 800; letter-spacing: 0.03em; }
-    h2.dash-title .accent { color: #d0021b; }
+    h2.dash-title { background: linear-gradient(90deg, #000000 0%, #3a3a3a 50%, #707070 100%);
+                    -webkit-background-clip: text; background-clip: text;
+                    -webkit-text-fill-color: transparent; color: transparent;
+                    width: fit-content; }
     h2.assist-title { font-family: 'Space Grotesk', 'Helvetica Neue', Arial, sans-serif !important;
                       font-weight: 700; letter-spacing: 0.01em; }
 
@@ -407,7 +410,7 @@ dashboard_col, chat_col = st.columns([1.8, 1], gap="large")
 
 with dashboard_col:
 
-    st.markdown('<h2 class="panel-title dash-title">Inventory <span class="accent">Dashboard</span></h2>', unsafe_allow_html=True)
+    st.markdown('<h2 class="panel-title dash-title">Inventory Dashboard</h2>', unsafe_allow_html=True)
 
     # ------------------------------------------------------
     # 5a. FILTERS + KPI CARDS (shared by all tabs)
