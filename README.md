@@ -8,7 +8,7 @@ An agentic AI assistant that helps a store manager decide **what to reorder, how
 ## What it does
 
 * **Dashboard (left):** KPIs; stock vs. reorder point, days of cover and order charts; a product table with photos; and, for any product, its photo, the step-by-step calculation, and 90 days of sales plotted against the forecast.
-* **Stock Pilot (right):** the AI inventory agent chat; answers questions in plain English, such as *"Which products should I prioritize?"*, *"Why does Lucy blouse need replenishment?"* or *"What if demand increases by 20%?"*. When it talks about a product, it shows its photo.
+* **Stock Pilot (right):** the AI inventory agent chat (type, or ask by voice with the microphone: Gemini writes the question down, then it is answered like a typed one); answers questions in plain English, such as *"Which products should I prioritize?"*, *"Why does Lucy blouse need replenishment?"* or *"What if demand increases by 20%?"*. When it talks about a product, it shows its photo.
 * **Your own data:** in **Settings → Use your own data**, upload a sales CSV (`date, product, units`) and optionally a stock CSV (`product, current_stock`). The same models and the AI agent then work on your products. Example files are in `data/example_upload/`.
 * **Stock runway on each reorder card:** a bar shows how many days the stock lasts against the delivery lead time, with the days short and the units of sales at risk (demand during the lead time that current stock cannot cover).
 * **Explore the models (Settings):** one-click scenarios (Holiday rush, Supplier delay, Cheaper ordering, Play it safe), what-if sliders that preview the plan before applying it, the EOQ cost curve for any product, the safety stock trade-off (extra holding cost per service level), and a side-by-side comparison of up to 4 saved scenarios.
@@ -86,7 +86,7 @@ The agent **asks for missing inputs** ("increase demand by how much?") instead o
 | `notebooks/…HM.ipynb` | Colab notebook: the full model walk-through with tests |
 | `evaluation/live_gemini_runs.md` | Live AI evaluation: the 6 demo questions asked 3 times each |
 | `data/example_upload/` | Example sales and stock files for the upload feature |
-| `tests/test_inventory.py` | 48 automated tests |
+| `tests/test_inventory.py` | 49 automated tests |
 | `.streamlit/config.toml` | Forces the light theme |
 
 ## Run it on your computer

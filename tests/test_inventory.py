@@ -433,3 +433,23 @@ def test_safety_stock_tradeoff(base):
     # Extra cost = safety stock units x $2 holding cost.
     r = trade[trade["Service_Level"] == 95].iloc[0]
     assert r["Extra_Holding_Cost"] == pytest.approx(r["Safety_Stock_Units"] * 2, abs=1)
+
+
+def test_voice_question_is_transcribed():
+    """A spoken question becomes plain text, then goes through the normal agent."""
+    from agent import transcribe_audio
+
+    class Resp:
+        text = '  "Which products should I   prioritize?" \n'
+
+    class Models:
+        def generate_content(self, model, contents, config):
+            assert contents[0].inline_data.mime_type == "audio/wav"
+            assert "exactly what the speaker says" in contents[1]
+            return Resp()
+
+    class Client:
+        models = Models()
+
+    assert transcribe_audio(b"RIFF....", "key", client=Client()) == "Which products should I prioritize?"
+    assert transcribe_audio(b"", "key", client=Client()) == ""

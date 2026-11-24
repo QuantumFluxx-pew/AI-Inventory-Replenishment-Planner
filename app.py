@@ -38,6 +38,7 @@ GeminiAgent = agent_module.GeminiAgent
 InventoryTools = agent_module.InventoryTools
 OfflineAssistant = agent_module.OfflineAssistant
 verify_numbers = agent_module.verify_numbers
+transcribe_audio = agent_module.transcribe_audio
 
 # ==========================================================
 # 1. PAGE CONFIGURATION
@@ -1128,11 +1129,31 @@ with chat_col:
                                   label_visibility="collapsed")
         sent = send_col.form_submit_button("Ask", width="stretch", type="primary")
 
+    # Ask by voice: record a question; Gemini writes it down, then it is asked
+    # exactly like a typed question (the answer still comes from the Python tools).
+    voice_key = f"voice_{st.session_state.setdefault('voice_n', 0)}"
+    spoken = st.audio_input(
+        "Or ask by voice: click the microphone, speak, then click stop",
+        key=voice_key, disabled=not AI_ENABLED,
+        help=None if AI_ENABLED else "Voice questions need the AI agent (a Gemini API key).")
+    voice_question = ""
+    if spoken is not None and AI_ENABLED:
+        with st.spinner("Listening..."):
+            try:
+                voice_question = transcribe_audio(spoken.getvalue(), API_KEY, MODEL_NAME,
+                                                  getattr(spoken, "type", None) or "audio/wav")
+            except Exception as err:
+                st.warning(f"Could not understand the recording ({type(err).__name__}). "
+                           "Please try again or type the question.")
+        st.session_state.voice_n += 1   # fresh recorder next time
+        if not voice_question:
+            st.info("No words were heard. Please try again or type the question.")
+
     if st.button("Clear conversation", key="clear_chat", type="tertiary"):
         st.session_state.messages = [{"role": "assistant", "content": GREETING}]
         st.rerun()
 
-    question = picked or (typed.strip() if sent else "")
+    question = picked or (typed.strip() if sent else "") or voice_question
 
     if question:
         history = [{"role": m["role"], "content": m["content"]}

@@ -539,6 +539,30 @@ def verify_numbers(text: str, tool_calls: list, question: str = "",
 # 3. LLM AGENT (Google Gemini tool calling)
 # ======================================================================
 
+TRANSCRIBE_PROMPT = ("Write down exactly what the speaker says in this recording, in English. "
+                     "Return only the spoken words as one plain sentence or question, with no "
+                     "notes. If nothing is said, return an empty reply.")
+
+
+def transcribe_audio(audio_bytes: bytes, api_key: str, model_name: str = DEFAULT_MODEL,
+                     mime_type: str = "audio/wav", client=None) -> str:
+    """Turn a spoken question into text with Gemini, so it can be asked like a
+    typed one. Only transcribes: the answer still comes from the tool-calling
+    agent and the Python models."""
+    from google.genai import types
+    if client is None:
+        from google import genai
+        client = genai.Client(api_key=api_key)
+    if not audio_bytes:
+        return ""
+    resp = client.models.generate_content(
+        model=model_name,
+        contents=[types.Part.from_bytes(data=audio_bytes, mime_type=mime_type), TRANSCRIBE_PROMPT],
+        config=types.GenerateContentConfig(temperature=0))
+    text = (getattr(resp, "text", None) or "").strip().strip('"').strip()
+    return " ".join(text.split())
+
+
 class GeminiAgent:
     """Runs the tool-calling loop with Google Gemini."""
 
