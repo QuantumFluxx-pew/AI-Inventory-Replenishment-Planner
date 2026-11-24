@@ -22,21 +22,21 @@ How they were chosen:
 1. **On Kaggle** (`kaggle/hm_select_products.py`): count units sold per product per day for the last 365 days. Keep products sold on ≥ 90% of days, and rank them by forecastability (SMA error ÷ average demand). Save the top 40 with their photos.
 2. **Cleaning** (`prepare_data.py`): check for gaps, negatives and duplicates. Drop products **being phased out** (last 4 weeks < 50% of their yearly average). Keep at most 3 per product type. Make 300-pixel photo thumbnails.
 
-**Assumptions, clearly labelled:** H&M doesn't publish stock levels, costs or lead times. **Current stock is simulated** with a fixed random seed (3–12 days of cover). Ordering cost $50, holding cost $2/unit/year and a 7-day lead time are sample values.
+**Assumptions, clearly labelled:** H&M doesn't publish stock levels, costs or lead times. **Current stock is simulated** with a fixed random seed (3 to 12 days of cover). Ordering cost $50, holding cost $2/unit/year and a 7-day lead time are sample values.
 
 ## Embedded analytical models (`inventory_model.py`)
 
 | Model | Formula | Purpose |
 |---|---|---|
 | Simple Moving Average | d = mean of last N days (N = 7 by default) | Daily demand forecast (default model) |
-| Simple Exponential Smoothing | level = α·sales + (1 − α)·previous level; α fitted per product | Second forecast model |
+| Simple Exponential Smoothing | level = α·sales + (1 - α)·previous level; α fitted per product | Second forecast model |
 | Best per product | the model with the lower error on the last 1/3 of the year | Picks the more accurate forecast |
-| MAE (back-test) | mean \|actual − one-day-ahead SMA\| over the year | Forecast accuracy |
+| MAE (back-test) | mean \|actual - one-day-ahead SMA\| over the year | Forecast accuracy |
 | Economic Order Quantity | EOQ = ⌈√(2DS / H)⌉, D = 365·d | How much to order |
 | Reorder Point | ROP = ⌈d·L + safety stock⌉ | When to order |
 | Safety stock (optional) | z · 1.25·MAE · √L | Buffer for forecast error |
 | Annual cost | (D / EOQ)·S + (EOQ / 2)·H | Yearly ordering + holding cost of the policy |
-| Sales at risk | ⌈max(0, d·L − stock)⌉ | Demand during the lead time that current stock cannot cover |
+| Sales at risk | ⌈max(0, d·L - stock)⌉ | Demand during the lead time that current stock cannot cover |
 
 Rule: if current stock ≤ ROP, order EOQ units.
 
