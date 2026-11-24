@@ -93,7 +93,18 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
+The app opens in your browser at http://localhost:8501.
+
 To enable the AI agent locally, copy `.streamlit/secrets.toml.example` to `.streamlit/secrets.toml` and add your key.
+
+## How to use it (user guide)
+
+1. **Open the app** (the live link above, or run it on your computer). The dashboard is on the left and the Stock Pilot chat is on the right.
+2. **See what to reorder:** the **Overview** tab shows the totals and the products to reorder now, most urgent first. Use the filters to show all products, only reorders, or search for one.
+3. **Look at one product:** the **Product Details** tab shows its photo, the step-by-step calculation (forecast, EOQ, reorder point, decision, annual cost) and 90 days of sales against both forecasts.
+4. **Ask Stock Pilot:** type a question such as *"Which products should I prioritize?"* or *"What if demand increases by 20%?"*. If something is missing, it asks you. Open **Tools used** under an answer to see which Python tool produced the numbers.
+5. **Change the inputs:** in **Settings**, change the ordering cost, holding cost, lead time, demand change, safety stock or forecast model, then click **Recalculate**. Or ask Stock Pilot, for example *"Change lead time to 14 days"*. Click **Reset to defaults** to go back.
+6. **Use your own data:** in **Settings → Use your own data**, download the sales and stock templates, fill them in, upload them and click **Use this data**. Click **Back to the H&M sample data** to return.
 
 ## Turn on the AI agent on Streamlit Cloud
 
@@ -144,12 +155,17 @@ Open **"Tools used"** under any answer to show that Python, not the LLM, produce
 
 * Stock levels are simulated, and costs and lead time are assumptions. H&M prices in the dataset are scaled, so they aren't used.
 * The sales are online purchases, so they're a stand-in for store or warehouse demand.
-* An SMA reacts slowly to trends and seasonality; for example, Lucy blouse sales more than doubled in the final weeks.
+* The forecasts (SMA and exponential smoothing) have no seasonality, promotions or price effects; for example, Lucy blouse sales more than doubled in the final weeks.
+* Settings and uploads reset when the page reloads.
 * Only 18 products; the safety-stock σ ≈ 1.25 × MAE assumes roughly normal errors.
 * Offline mode only understands simple phrasings.
 
 ## Future improvements
 
-* Compare SMA with exponential smoothing and choose the more accurate one per product.
-* Let users upload their own stock levels and costs.
+* Connect to a live inventory system for real stock levels instead of files.
+* Seasonal forecasting (Holt-Winters), including holidays and promotions.
+* Supplier rules: minimum orders, quantity discounts, shared deliveries.
+* Alerts and saved scenarios, so settings and uploads are kept between sessions.
 * Detect fading products automatically and suggest not reordering them.
+
+Done for the final: exponential smoothing with a best-per-product option, the annual cost estimate, and uploading your own sales and stock data.
