@@ -401,3 +401,35 @@ def test_agent_retries_when_gemini_is_busy(tools):
     agent.retry_waits = (0, 0)   # no real waiting in tests
     reply = agent.ask("how many units available?", [], tools)
     assert reply.text.startswith("You have 3,346") and Models.calls == 2
+
+
+# ---------------------------------------------------------------- 8. dashboard extras
+def test_units_at_risk_by_hand(base):
+    # Harrison top: 27.14/day x 7 days = 190 units needed, 97 in stock -> 93 at risk.
+    plan = m.calculate_plan(base)
+    assert row(plan, "0678942001")["Units_At_Risk"] == 93
+    # Brit Baby Tee lasts exactly the 7-day lead time -> nothing at risk.
+    assert row(plan, BRIT_TEE)["Units_At_Risk"] == 0
+
+
+def test_cost_curve_lowest_at_eoq():
+    # Brit Baby Tee: D = 3,389.3, S = $50, H = $2 -> EOQ about 411.7, total about $823.
+    curve = m.cost_curve(65 / 7 * 365, 50, 2, points=281)
+    best = curve.loc[curve["Total_Cost"].idxmin()]
+    assert best["Order_Size"] == pytest.approx(411.7, rel=0.02)
+    assert best["Total_Cost"] == pytest.approx(823.3, abs=1)
+    # Ordering cost falls and holding cost rises as orders get bigger.
+    assert curve["Ordering_Cost"].is_monotonic_decreasing
+    assert curve["Holding_Cost"].is_monotonic_increasing
+    with pytest.raises(m.InputError):
+        m.cost_curve(0, 50, 2)
+
+
+def test_safety_stock_tradeoff(base):
+    trade = m.safety_stock_tradeoff(base, m.DEFAULT_ASSUMPTIONS)
+    assert list(trade["Service_Level"]) == list(m.ALLOWED_SERVICE_LEVELS)
+    assert trade.iloc[0]["Safety_Stock_Units"] == 0            # none = no safety stock
+    assert trade["Extra_Holding_Cost"].is_monotonic_increasing  # more safety costs more
+    # Extra cost = safety stock units x $2 holding cost.
+    r = trade[trade["Service_Level"] == 95].iloc[0]
+    assert r["Extra_Holding_Cost"] == pytest.approx(r["Safety_Stock_Units"] * 2, abs=1)

@@ -17,6 +17,7 @@ Run locally:   streamlit run app.py
 import base64
 import importlib
 import os
+from dataclasses import replace
 
 import altair as alt
 import pandas as pd
@@ -185,6 +186,15 @@ st.markdown("""
     .pcard .ptype { color: #666; font-size: 0.75rem; }
     .pcard .porder { color: #d0021b; font-weight: 700; font-size: 0.85rem; margin-top: 4px; }
     .pcard .pcover { color: #444; font-size: 0.75rem; }
+    /* Stock runway: how long stock lasts (black) vs. the delivery lead time (tick).
+       The red part is the gap: days with no stock before a new order arrives. */
+    .runway { position: relative; height: 8px; background: #ecebe7; margin: 6px 0 3px 0; }
+    .runway .rw-fill { position: absolute; left: 0; top: 0; bottom: 0; background: #111; }
+    .runway .rw-gap { position: absolute; top: 0; bottom: 0; background: #d0021b; }
+    .runway .rw-lead { position: absolute; top: -3px; bottom: -3px; width: 2px; background: #52514e; }
+    .pcard .prisk { color: #d0021b; font-size: 0.72rem; font-weight: 600; }
+    .pcard .psafe { color: #52514e; font-size: 0.72rem; }
+    .scenario-note { font-size: 0.85rem; color: #4A4A47; margin: -0.2rem 0 0.6rem 0; }
 
     /* Chat messages */
     [data-testid="stChatMessage"] { background: #fff; border: 1px solid #e5e5e5;
@@ -388,6 +398,95 @@ def order_quantity_chart(data):
     return _style(bars + values, height=max(120, 28 * len(top)))
 
 
+SCENARIOS = {
+    # label: (change from the defaults, tooltip)
+    "Holiday rush": ({"demand_change_pct": 30}, "Demand 30% higher than the forecast."),
+    "Supplier delay": ({"lead_time_days": 14}, "Deliveries take 14 days instead of 7."),
+    "Cheaper ordering": ({"ordering_cost": 25}, "Each order costs $25 instead of $50."),
+    "Play it safe": ({"service_level": 95}, "Add safety stock for a 95% service level."),
+}
+
+
+def describe_changes(a):
+    """Plain-text list of the settings that differ from the defaults."""
+    d = model.DEFAULT_ASSUMPTIONS
+    fields = [("Ordering cost", d.ordering_cost, a.ordering_cost, "${:g}"),
+              ("Holding cost", d.holding_cost, a.holding_cost, "${:g}"),
+              ("Lead time", d.lead_time_days, a.lead_time_days, "{:g} days"),
+              ("Demand", d.demand_change_pct, a.demand_change_pct, "{:+g}%"),
+              ("Service level", d.service_level, a.service_level, "{:g}%"),
+              ("Forecast window", d.sma_window, a.sma_window, "{:g} days")]
+    out = [f"{name} {fmt.format(new)}" for name, old, new, fmt in fields if old != new]
+    if d.forecast_model != a.forecast_model:
+        out.append(model.FORECAST_MODEL_NAMES[a.forecast_model])
+    return out
+
+
+def runway_html(days_left, lead_time, units_at_risk):
+    """Small bar for a product card: stock runway vs. lead time, plus the
+    sales at risk if an order placed today arrives after the lead time."""
+    if pd.isna(days_left):
+        return '<div class="pcover">No forecast demand</div>'
+    scale = max(lead_time * 1.5, float(days_left), 1.0)
+    fill = min(days_left, scale) / scale * 100
+    lead_pos = lead_time / scale * 100
+    gap = max(lead_pos - fill, 0)
+    bar = (f'<div class="runway"><div class="rw-fill" style="width:{fill:.1f}%"></div>'
+           f'<div class="rw-gap" style="left:{fill:.1f}%;width:{gap:.1f}%"></div>'
+           f'<div class="rw-lead" style="left:{lead_pos:.1f}%"></div></div>')
+    text = f'<div class="pcover">Runs out in {days_left:g} days</div>'
+    if units_at_risk > 0:
+        text += (f'<div class="prisk">{lead_time - days_left:.1f} days short · '
+                 f'{units_at_risk:,} units of sales at risk</div>')
+    else:
+        text += '<div class="psafe">Lasts until a new order arrives</div>'
+    return bar + text
+
+
+def cost_curve_chart(curve, eoq, name):
+    """EOQ trade-off: ordering cost falls and holding cost rises with order
+    size; the total is lowest at the EOQ, where the two meet."""
+    long = curve.rename(columns={"Ordering_Cost": "Ordering cost", "Holding_Cost": "Holding cost",
+                                 "Total_Cost": "Total cost"}).melt(
+        "Order_Size", var_name="Cost", value_name="Dollars")
+    colors = alt.Scale(domain=["Total cost", "Ordering cost", "Holding cost"],
+                       range=["#111111", "#8a8984", "#8a8984"])
+    dashes = alt.Scale(domain=["Total cost", "Ordering cost", "Holding cost"],
+                       range=[[1, 0], [6, 4], [2, 3]])
+    lines = alt.Chart(long).mark_line(strokeWidth=2.2).encode(
+        x=alt.X("Order_Size:Q", title=f"Order size (units) · {name}"),
+        y=alt.Y("Dollars:Q", title="Cost per year ($)", axis=alt.Axis(format="$,.0f")),
+        color=alt.Color("Cost:N", scale=colors, legend=alt.Legend(orient="top", title=None)),
+        strokeDash=alt.StrokeDash("Cost:N", scale=dashes, legend=None),
+        tooltip=[alt.Tooltip("Cost:N"), alt.Tooltip("Order_Size:Q", title="Order size", format=",.0f"),
+                 alt.Tooltip("Dollars:Q", title="Cost per year", format="$,.2f")])
+    mark =pd.DataFrame({"x": [eoq], "label": [f"EOQ {eoq:,} units"]})
+    rule = alt.Chart(mark).mark_rule(color="#d0021b", strokeWidth=2).encode(x="x:Q")
+    label = alt.Chart(mark).mark_text(align="left", dx=6, dy=-6, color="#d0021b",
+                                      fontSize=12, fontWeight="bold").encode(
+        x="x:Q", y=alt.value(0), text="label:N")
+    return _style(lines + rule + label, height=280)
+
+
+def safety_tradeoff_chart(table):
+    """Yearly holding cost of the safety stock at each service level."""
+    data = table[table["Service_Level"] > 0].copy()
+    data["Level"] = data["Service_Level"].map(lambda v: f"{v:g}%")
+    base = alt.Chart(data).encode(
+        x=alt.X("Level:N", sort=None, title="Chance of not running out during the lead time",
+                axis=alt.Axis(labelAngle=0)))
+    bars = base.mark_bar(color="#111111", cornerRadiusEnd=4, size=46).encode(
+        y=alt.Y("Extra_Holding_Cost:Q", title="Extra holding cost per year ($)",
+                axis=alt.Axis(format="$,.0f"), scale=alt.Scale(domainMax=float(data["Extra_Holding_Cost"].max()) * 1.15)),
+        tooltip=[alt.Tooltip("Level:N", title="Service level"),
+                 alt.Tooltip("Safety_Stock_Units:Q", title="Safety stock (units)", format=","),
+                 alt.Tooltip("Extra_Holding_Cost:Q", title="Extra cost per year", format="$,.2f"),
+                 alt.Tooltip("Need_Reorder:Q", title="Products to reorder")])
+    values = base.mark_text(dy=-8, color="#202b43", fontSize=12).encode(
+        y="Extra_Holding_Cost:Q", text=alt.Text("Extra_Holding_Cost:Q", format="$,.0f"))
+    return _style(bars + values, height=260)
+
+
 def sales_history_chart(daily_sales, window, alpha, uses_ses, days=90):
     """Actual daily units sold (bars) vs. both one-day-ahead forecasts (lines)
     for the last `days` days. The model in use is drawn solid and black; the
@@ -477,6 +576,7 @@ with dashboard_col:
             if not urgent.empty:
                 st.markdown("**REORDER NOW** · most urgent first")
                 cards = st.columns(6)
+                lead = float(assumptions.lead_time_days)
                 for col, (_, r) in zip(cards, urgent.iterrows()):
                     img = photo_uri(r["Product_ID"]) or ""
                     col.markdown(
@@ -484,8 +584,11 @@ with dashboard_col:
                         f'<div class="pname">{r["Name"]}</div>'
                         f'<div class="ptype">{r["Product_Type"]} · {r["Colour"]}</div>'
                         f'<div class="porder">Order {int(r["Order_Quantity"]):,}</div>'
-                        f'<div class="pcover">{r["Days_of_Cover"]:g} days of stock left</div></div>',
+                        + runway_html(r["Days_of_Cover"], lead, int(r["Units_At_Risk"]))
+                        + '</div>',
                         unsafe_allow_html=True)
+                st.caption(f"Bar = days of stock left. Gray tick = a new order arrives "
+                           f"({lead:g}-day lead time). Red = days with no stock before it arrives.")
                 st.write("")
 
             view = st.segmented_control(
@@ -629,6 +732,17 @@ with dashboard_col:
             + "Change them and click **Recalculate**; "
             "every tab and the assistant use the new values."
         )
+        # One-click scenarios: each starts from the defaults and changes one input.
+        st.markdown("**Quick scenarios**")
+        st.markdown('<p class="scenario-note">One click applies a scenario to every tab. '
+                    'Reset to defaults goes back.</p>', unsafe_allow_html=True)
+        q_cols = st.columns(len(SCENARIOS))
+        for q_col, (label, (change, tip)) in zip(q_cols, SCENARIOS.items()):
+            if q_col.button(label, help=tip, width="stretch", key=f"scenario_{label}"):
+                st.session_state.assumptions = model.validate_assumptions(
+                    **{**model.DEFAULT_ASSUMPTIONS.to_dict(), **change})
+                st.rerun()
+
         with st.form("assumptions_form"):
             c1, c2, c3 = st.columns(3)
             ordering_cost = c1.number_input(
@@ -754,6 +868,105 @@ with dashboard_col:
                     "Order_Quantity": st.column_config.NumberColumn("Order (EOQ)", format="localized"),
                 },
             )
+
+        # Explore: interactive views of the same models.
+        st.divider()
+        st.markdown("**Explore the models**")
+        explore = st.segmented_control(
+            "Explore", ["What-if sliders", "EOQ cost curve", "Safety stock", "Compare scenarios"],
+            default="What-if sliders", label_visibility="collapsed",
+            key="explore_view") or "What-if sliders"
+
+        if explore == "What-if sliders":
+            st.caption("Move the sliders to preview the plan. Nothing changes until you click "
+                       "**Apply to dashboard**.")
+            s1, s2 = st.columns(2)
+            wi_demand = s1.slider("Demand change (%)", -50.0, 100.0, step=5.0, format="%+.0f%%",
+                                  value=float(min(max(assumptions.demand_change_pct, -50), 100)))
+            wi_lead = s2.slider("Lead time (days)", 1.0, 30.0, step=1.0, format="%.0f days",
+                                value=float(min(max(assumptions.lead_time_days, 1), 30)))
+            preview_a = replace(assumptions, demand_change_pct=wi_demand, lead_time_days=wi_lead)
+            preview = model.summarize(model.calculate_plan(base_df, preview_a))
+
+            def _vs(key, money=False):
+                diff = preview[key] - all_summary[key]
+                if not round(diff):
+                    return None
+                if money:
+                    return f"{'+' if diff > 0 else '-'}${abs(diff):,.0f} vs. now"
+                return f"{diff:+,} vs. now"
+
+            p1, p2, p3 = st.columns(3)
+            p1.metric("Need Reorder", preview["need_reorder"], delta=_vs("need_reorder"),
+                      delta_color="off")
+            p2.metric("Units to Order", f"{preview['recommended_order_units']:,}",
+                      delta=_vs("recommended_order_units"), delta_color="off")
+            p3.metric("Annual Cost", f"${preview['total_annual_policy_cost']:,.0f}",
+                      delta=_vs("total_annual_policy_cost", money=True), delta_color="off")
+            if preview_a != assumptions and st.button("Apply to dashboard", width="stretch"):
+                st.session_state.assumptions = preview_a
+                st.rerun()
+
+        elif explore == "EOQ cost curve":
+            st.caption("Bigger orders mean fewer orders (ordering cost falls) but more stock on "
+                       "the shelf (holding cost rises). The total is lowest where the two meet: "
+                       "that order size is the EOQ.")
+            with_demand = plan[plan["Annual_Demand"] > 0]
+            pick = st.selectbox("Product", with_demand["Name"].tolist(), key="curve_product")
+            r = with_demand[with_demand["Name"] == pick].iloc[0]
+            curve = model.cost_curve(float(r["Annual_Demand"]), assumptions.ordering_cost,
+                                     assumptions.holding_cost)
+            chart = cost_curve_chart(curve, int(r["EOQ"]), pick)
+            st.altair_chart(chart, width="stretch", height=chart.height)
+            c_ord = r["Annual_Demand"] / r["EOQ"] * assumptions.ordering_cost
+            c_hold = r["EOQ"] / 2 * assumptions.holding_cost
+            st.caption(f"At the EOQ of {int(r['EOQ']):,} units: ordering ${c_ord:,.2f} + holding "
+                       f"${c_hold:,.2f} = ${r['Annual_Cost']:,.2f} a year. Change the ordering or "
+                       "holding cost above and the curve moves.")
+
+        elif explore == "Safety stock":
+            st.caption("Safety stock is extra stock for days when sales are higher than the "
+                       "forecast. A higher service level means less risk of running out, but "
+                       "more stock to pay for.")
+            trade = model.safety_stock_tradeoff(base_df, assumptions)
+            chart = safety_tradeoff_chart(trade)
+            st.altair_chart(chart, width="stretch", height=chart.height)
+            st.dataframe(
+                trade, hide_index=True, width="stretch",
+                column_config={
+                    "Service_Level": st.column_config.NumberColumn("Service level (%)", format="%g"),
+                    "Safety_Stock_Units": st.column_config.NumberColumn("Safety stock (units)",
+                                                                        format="localized"),
+                    "Extra_Holding_Cost": st.column_config.NumberColumn("Extra cost per year",
+                                                                        format="dollar"),
+                    "Need_Reorder": "Products to reorder",
+                })
+            st.caption("Uses the current lead time and holding cost. To use a service level, "
+                       "pick it in the form above and click **Recalculate**.")
+
+        else:
+            st.caption("Save the current settings as a scenario, change the settings, save "
+                       "again, and compare them side by side (up to 4).")
+            saved = st.session_state.setdefault("saved_scenarios", [])
+            b_save, b_clear = st.columns(2)
+            if b_save.button("Save current settings", width="stretch", disabled=len(saved) >= 4):
+                saved.append({
+                    "Scenario": "ABCD"[len(saved)],
+                    "Settings": ", ".join(describe_changes(assumptions)) or "Default settings",
+                    "Products to reorder": all_summary["need_reorder"],
+                    "Units to order": all_summary["recommended_order_units"],
+                    "Annual cost": all_summary["total_annual_policy_cost"],
+                })
+            if b_clear.button("Clear saved scenarios", width="stretch", disabled=not saved):
+                saved.clear()
+            if saved:
+                st.dataframe(pd.DataFrame(saved), hide_index=True, width="stretch",
+                             column_config={
+                                 "Units to order": st.column_config.NumberColumn(format="localized"),
+                                 "Annual cost": st.column_config.NumberColumn(format="dollar"),
+                             })
+            else:
+                st.info("No saved scenarios yet. Click **Save current settings** to start.")
 
         # Upload your own data: same models, a store's own sales and stock.
         st.divider()

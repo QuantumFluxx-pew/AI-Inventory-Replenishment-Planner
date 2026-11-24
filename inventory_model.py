@@ -48,7 +48,7 @@ from statistics import NormalDist
 import numpy as np
 import pandas as pd
 
-MODEL_VERSION = "hm-2026-11-19"   # must match agent.MODEL_VERSION (see app.py)
+MODEL_VERSION = "hm-2026-11-24"   # must match agent.MODEL_VERSION (see app.py)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PRODUCTS_CSV = os.path.join(HERE, "data", "products.csv")
@@ -532,6 +532,11 @@ def calculate_plan(base: pd.DataFrame, assumptions: Assumptions = DEFAULT_ASSUMP
         cover = plan["Current_Stock"] / plan["Daily_Demand"]
     plan["Days_of_Cover"] = cover.replace(np.inf, np.nan).round(1)
     plan["Shortfall"] = (plan["ROP"] - plan["Current_Stock"]).clip(lower=0).astype(int)
+    # Sales at risk: demand during the lead time that current stock cannot cover,
+    # i.e. what would be lost if an order placed today arrives after L days.
+    plan["Units_At_Risk"] = _ceil(
+        (plan["Daily_Demand"] * a.lead_time_days - plan["Current_Stock"]).clip(lower=0)
+    ).astype(int)
 
     # Annual cost of the EOQ policy: ordering + holding cost.
     with np.errstate(divide="ignore", invalid="ignore"):
@@ -540,6 +545,37 @@ def calculate_plan(base: pd.DataFrame, assumptions: Assumptions = DEFAULT_ASSUMP
         orders_per_year * a.ordering_cost + plan["EOQ"] / 2 * a.holding_cost, 2)
 
     return plan
+
+
+def cost_curve(annual_demand, ordering_cost, holding_cost, points=60):
+    """Ordering, holding and total yearly cost for a range of order sizes
+    around the EOQ (from 20% to 300% of it). Shows why the EOQ is the
+    cheapest order size: there the two costs meet and the total is lowest."""
+    if ordering_cost <= 0 or holding_cost <= 0:
+        raise InputError("Ordering cost and holding cost must be greater than 0.")
+    if annual_demand <= 0:
+        raise InputError("This product has no forecast demand, so there is no cost curve.")
+    eoq = math.sqrt(2 * annual_demand * ordering_cost / holding_cost)
+    q = np.linspace(0.2 * eoq, 3 * eoq, points)
+    ordering = annual_demand / q * ordering_cost
+    holding = q / 2 * holding_cost
+    return pd.DataFrame({"Order_Size": q, "Ordering_Cost": ordering,
+                         "Holding_Cost": holding, "Total_Cost": ordering + holding})
+
+
+def safety_stock_tradeoff(base: pd.DataFrame, assumptions: "Assumptions") -> pd.DataFrame:
+    """For each allowed service level: total safety stock (units) across all
+    products, its yearly holding cost, and how many products need reordering.
+    Everything else stays at the current assumptions."""
+    rows = []
+    for level in ALLOWED_SERVICE_LEVELS:
+        plan = calculate_plan(base, replace(assumptions, service_level=level))
+        units = float(plan["Safety_Stock"].sum())
+        rows.append({"Service_Level": level,
+                     "Safety_Stock_Units": round(units),
+                     "Extra_Holding_Cost": round(units * assumptions.holding_cost, 2),
+                     "Need_Reorder": int((plan["Status"] == "Reorder").sum())})
+    return pd.DataFrame(rows)
 
 
 def summarize(plan: pd.DataFrame) -> dict:
